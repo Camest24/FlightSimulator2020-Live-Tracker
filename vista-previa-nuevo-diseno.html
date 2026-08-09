@@ -1,0 +1,666 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Vista previa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --glass-bg: rgba(18,22,30,0.40);
+    --glass-brd: rgba(255,255,255,0.16);
+    --bar-bg: rgba(255,255,255,0.10);
+    --bar-brd: rgba(255,255,255,0.20);
+    --row-border: rgba(255,255,255,0.12);
+    --text: #f6f8fb;
+    --text-dim: rgba(246,248,251,0.55);
+    --accent: #3b82f6;
+    --green: #4ade80;
+    --orange: #fb923c;
+    --amber: #fbbf24;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    /* Tamaño de los paneles de datos. Solo escala los paneles, no la barra de
+       herramientas ni el zoom: los botones tienen que seguir siendo cómodos de tocar. */
+    --ui: 1;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; font-family:'Archivo','Roboto',system-ui,sans-serif; overflow:hidden; background:#0b0e14; }
+  /* Todo número va en mono con cifras de ancho fijo, para que no "salte" al actualizarse */
+  .num{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+  /* Odómetro: cada dígito es una tira 0-9 que se desliza, como el altímetro de cabina.
+     La altura de cada cifra es exactamente 1em, por eso el line-height va clavado en 1. */
+  .odo{ display:inline-flex; align-items:flex-end; }
+  /* 1ch = el ancho de un dígito; como la fuente de números es monoespaciada, calza exacto */
+  .odo .od{ display:inline-block; width:1ch; height:1em; overflow:hidden; position:relative; }
+  .odo .od-r{ display:block; transition:transform .5s cubic-bezier(.22,1,.3,1); }
+  .odo .od-r span{ display:block; height:1em; line-height:1; }
+  .odo .od-f{ display:inline-block; line-height:1; }
+  @media (prefers-reduced-motion: reduce){ .odo .od-r{ transition:none; } }
+
+  /* Los iconos responden al toque: crecen un pelo y se hunden al apretar */
+  .tool-btn svg, .btn-sq svg, .btn svg, #compass svg, .fail-item .fi-ico{ transition:transform .22s cubic-bezier(.3,1.4,.5,1); }
+  .tool-btn:hover svg, .btn-sq:hover svg{ transform:scale(1.14); }
+  .tool-btn:active svg, .btn-sq:active svg, .btn:active svg{ transform:scale(.9); }
+  .tool-btn.disabled:hover svg{ transform:none; }
+  #btn-reset:hover svg{ transform:rotate(-180deg); }          /* la flechita de reinicio gira */
+  #compass:hover svg{ transform:scale(1.08); }
+  .fail-item:hover .fi-ico{ transform:rotate(12deg) scale(1.15); }
+  /* Todo lo clicable se hunde rápido al apretar y vuelve despacio con un rebotito.
+     La asimetría (0.06s al bajar, 0.4s al subir) es lo que lo hace sentir físico. */
+  .tool-btn, .btn, .btn-sq, .rc-btn, .st-chip, .tile-steps button, .fail-item, .fail-repair,
+  .off-reset, .hist-del, .fq-cancel, .layer-opt, .opt-item, .sp-item, .rr-btn, .fail-mode, .lp-btn{
+    transition:transform .4s cubic-bezier(.2,1.5,.4,1), background .18s, color .18s, box-shadow .18s;
+    -webkit-tap-highlight-color:transparent; }
+  .tool-btn:active, .btn:active, .btn-sq:active, .rc-btn:active, .st-chip:active,
+  .tile-steps button:active, .fail-item:active, .fail-repair:active, .off-reset:active,
+  .hist-del:active, .fq-cancel:active, .layer-opt:active, .opt-item:active, .sp-item:active,
+  .rr-btn:active, .fail-mode:active, .lp-btn:active{
+    transform:scale(.93); transition-duration:.06s; }
+  .tool-btn.disabled:active, .fail-repair:disabled:active, .rc-btn:disabled:active{ transform:none; }
+  .pill .dot{ transition:background .3s; }
+  #map{ position:absolute; inset:0; z-index:1; background:#0b0e14; }
+  .maplibregl-ctrl-attrib, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left{ display:none !important; }
+
+  /* Pantalla de espera (tapa el mapa hasta tener una posición real, no el 0,0 del menú) */
+  #waiting{ position:absolute; inset:0; z-index:2000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; text-align:center; color:var(--text); background:rgba(11,14,20,0.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); transition:opacity .4s; }
+  #waiting.hidden{ opacity:0; pointer-events:none; }
+  /* Ícono en dos capas: el avión va suelto encima del cuadro y flota como en crucero.
+     El recorte del cuadro lo hace .w-icon, así el avión nunca se sale del borde. */
+  #waiting .w-icon{ position:relative; width:112px; height:112px; border-radius:26px;
+    overflow:hidden; filter:drop-shadow(0 16px 38px rgba(0,0,0,0.6)); }
+  #waiting .w-icon img{ position:absolute; inset:0; width:100%; height:100%; }
+  #waiting .w-icon-plane{ animation:volar 3.4s ease-in-out infinite; will-change:transform; }
+  /* Sube y baja 5 px mientras se ladea 2,5°: el ciclo cierra donde empieza, sin salto */
+  @keyframes volar{
+    0%   { transform:translateY(3px)  rotate(-1.2deg); }
+    25%  { transform:translateY(-2px) rotate(1.3deg); }
+    50%  { transform:translateY(-4px) rotate(0.4deg); }
+    75%  { transform:translateY(-1px) rotate(-1.6deg); }
+    100% { transform:translateY(3px)  rotate(-1.2deg); }
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .w-spinner{ width:30px; height:30px; border-radius:50%; border:3px solid rgba(255,255,255,0.15);
+    border-top-color:var(--amber); animation:spin .9s linear infinite; }
+  /* Cuando el sim ya respondió, la ruedita se cierra en verde y se queda quieta */
+  #waiting.listo .w-spinner{ border-color:#4ade80; animation:none; }
+  @media (prefers-reduced-motion: reduce){ .w-spinner, #waiting .w-icon-plane{ animation:none; } }
+
+  /* Panel del gráfico de velocidad/altitud */
+  /* El gráfico ya no tapa el mapa: cuelga debajo del panel de datos, en la misma columna */
+  #graph-panel{ width:100%; flex:none; height:190px; border-radius:24px; padding:16px 18px 14px;
+    color:var(--text); display:flex; flex-direction:column; }
+  #graph-panel.hidden{ display:none; }
+  .gp-head{ display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:10px; }
+  #gp-close{ cursor:pointer; font-size:14px; opacity:.6; }
+  #gp-close:hover{ opacity:1; }
+  .gp-body{ flex:1; position:relative; min-height:0; }
+
+  /* Botón de editar (junto a la altitud) + modal de ajuste */
+
+
+  #fail-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #fail-modal.hidden{ display:none; }
+  .fail-card{ width:min(94vw,520px); max-height:84vh; border-radius:20px; padding:18px 20px 18px; color:var(--text); display:flex; flex-direction:column; }
+  .fail-when{ margin-bottom:14px; }
+  .fail-k{ display:block; font-size:12.5px; color:var(--text-dim); font-weight:600; margin-bottom:8px; }
+  .fail-ctrl{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .fail-mode{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-family:inherit;
+    font-size:13px; font-weight:600; padding:8px 13px; border-radius:10px; }
+  .fail-mode.on{ background:#2f6df6; }
+  #fail-min{ width:76px; height:35px; border:none; border-radius:10px; background:rgba(255,255,255,0.08);
+    color:#fff; text-align:center; font-family:inherit; font-size:13px; font-weight:600; outline:none; }
+  #fail-body{ overflow-y:auto; display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .fail-item{ display:flex; align-items:center; gap:9px; padding:10px 11px; border-radius:11px; cursor:pointer;
+    background:rgba(255,255,255,0.06); font-size:13px; font-weight:500; transition:background .15s; }
+  .fail-item:hover{ background:rgba(239,68,68,0.22); }
+  .fail-item .fi-ico{ width:16px; height:16px; flex:none; color:#fca5a5; }
+  /* Las que están rotas ahora mismo: un clic más las repara */
+  .fail-item.roto{ background:rgba(239,68,68,0.28); color:#fecaca; }
+  .fail-item.roto:hover{ background:rgba(74,222,128,0.24); color:#bbf7d0; }
+  .fail-item.roto .fi-ico{ color:#fecaca; }
+  .fail-repair{ width:100%; height:42px; margin-bottom:14px; border:none; border-radius:13px; cursor:pointer;
+    background:rgba(74,222,128,0.22); color:#bbf7d0; font-family:inherit; font-size:13.5px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; transition:background .15s; }
+  .fail-repair:hover:not(:disabled){ background:rgba(74,222,128,0.34); }
+  .fail-repair:disabled{ opacity:.4; cursor:default; }
+  #fail-queue{ margin-top:12px; }
+  .fq-item{ display:flex; align-items:center; gap:10px; padding:9px 4px; border-top:1px solid var(--row-border); font-size:12.5px; }
+  .fq-name{ flex:1; }
+  .fq-time{ font-weight:700; color:#fb923c; font-variant-numeric:tabular-nums; }
+  .fq-cancel{ border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff; border-radius:8px;
+    font-size:11.5px; font-weight:600; padding:5px 9px; }
+
+  /* Menú de rutas alternativas */
+  #opts-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #opts-modal.hidden{ display:none; }
+  #opts-body{ max-height:62vh; overflow-y:auto; }
+  .opt-item{ display:flex; align-items:center; gap:12px; padding:12px 10px; border-radius:12px; cursor:pointer;
+    border:1px solid transparent; transition:background .15s; }
+  .opt-item:hover{ background:rgba(255,255,255,0.08); border-color:var(--border-strong); }
+  .opt-main{ flex:1; min-width:0; }
+  .opt-awy{ font-size:14.5px; font-weight:700; letter-spacing:.3px; color:#7dd3fc; }
+  .opt-pts{ font-size:12px; color:var(--text-dim); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .opt-nums{ text-align:right; font-size:13.5px; font-weight:700; white-space:nowrap; }
+  .opt-nums span{ display:block; font-size:11.5px; font-weight:500; color:var(--text-dim); margin-top:3px; }
+
+  /* Historial de vuelos */
+  #hist-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #hist-modal.hidden{ display:none; }
+  .hist-card{ width:min(94vw,520px); max-height:80vh; border-radius:20px; padding:18px 20px 16px; color:var(--text); display:flex; flex-direction:column; }
+  #hist-body{ overflow-y:auto; margin-right:-6px; padding-right:6px; }
+  .hist-item{ display:flex; align-items:center; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
+  .hist-main{ flex:1; min-width:0; }
+  .hist-route{ font-size:15px; font-weight:700; letter-spacing:-0.2px; }
+  .hist-sub{ font-size:12px; color:var(--text-dim); margin-top:3px; }
+  .hist-nums{ text-align:right; font-size:13px; font-weight:600; white-space:nowrap; }
+  .hist-nums span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:3px; white-space:nowrap; }
+  .hist-del{ border:none; cursor:pointer; background:rgba(239,68,68,0.16); color:#fca5a5; width:30px; height:30px;
+    border-radius:9px; font-size:15px; flex:none; display:flex; align-items:center; justify-content:center; }
+  .hist-del:hover{ background:rgba(239,68,68,0.3); }
+  .hist-empty{ color:var(--text-dim); font-size:14px; padding:22px 4px; text-align:center; }
+
+  /* Panel de estado del avión */
+  #status-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #status-modal.hidden{ display:none; }
+  .st-card{ width:min(92vw,430px); border-radius:20px; padding:18px 20px 20px; color:var(--text); }
+  .st-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
+  .st-label{ color:var(--text-dim); font-size:14px; font-weight:500; }
+  .st-val{ font-size:14px; font-weight:600; text-align:right; }
+  .st-val.on{ color:#4ade80; } .st-val.off{ color:var(--text-dim); }
+  /* Corrimiento horizontal del avión cuando el mapa lo sigue: el panel de datos tapa la
+     izquierda, así que a veces conviene empujarlo hacia la derecha. */
+  .off-box{ padding:14px 15px 12px; border-radius:16px; background:rgba(255,255,255,0.06); margin-bottom:16px; }
+  .off-top{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
+  .off-k{ font-size:13px; font-weight:600; color:var(--text); }
+  .off-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12px; color:var(--text-dim); }
+  .off-box input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:3px; outline:none; cursor:pointer;
+    background:linear-gradient(90deg,rgba(255,255,255,0.14),rgba(251,191,36,0.35),rgba(255,255,255,0.14)); }
+  .off-box input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:20px; height:20px; border-radius:50%;
+    background:var(--amber); border:none; cursor:pointer; box-shadow:0 3px 10px rgba(251,191,36,0.45); transition:transform .15s; }
+  .off-box input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.15); }
+  .off-box input[type=range]::-moz-range-thumb{ width:20px; height:20px; border-radius:50%; background:var(--amber); border:none; cursor:pointer; }
+  .off-box + .off-box{ margin-top:-6px; }
+  .off-scale{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-dim); margin-top:10px; }
+  .off-reset{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:var(--text);
+    font-family:inherit; font-size:11px; font-weight:600; padding:5px 11px; border-radius:9px; }
+  .off-reset:hover{ background:rgba(255,255,255,0.24); }
+
+  .st-chips{ display:flex; gap:8px; flex-wrap:wrap; width:100%; }
+  .st-chip{ flex:1; min-width:88px; text-align:center; font-size:13px; font-weight:600; padding:13px 10px;
+    border-radius:14px; background:rgba(255,255,255,0.08); color:var(--text-dim); cursor:pointer; transition:background .15s,color .15s; }
+  .st-chip:hover{ background:rgba(255,255,255,0.16); color:#fff; }
+  .st-chip.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.3); }
+  .st-chip.on:hover{ background:#fcc94a; color:#1a1204; }
+  .st-mid{ display:flex; align-items:center; gap:8px; }
+  .st-btn{ border:none; border-radius:8px; background:rgba(255,255,255,0.14); color:#fff; font-size:12px; font-weight:700; padding:6px 11px; cursor:pointer; }
+  .st-btn:hover{ background:rgba(255,255,255,0.24); }
+  .st-btn.st-green{ background:rgba(52,199,89,0.28); color:#7ee2a0; }
+  .st-btn.st-red{ background:rgba(239,68,68,0.22); color:#fca5a5; }
+
+  /* Contador de bajada de tren (teleporte de despegue) */
+  #gear-wait{ position:absolute; inset:0; z-index:2200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); }
+  #gear-wait.hidden{ display:none; }
+  .gw-card{ border-radius:20px; padding:26px 34px; text-align:center; color:var(--text); display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .gw-title{ font-size:15px; font-weight:600; margin-top:8px; }
+  .gw-pct{ font-size:42px; font-weight:800; color:#38bdf8; line-height:1.1; }
+  .gw-sub{ font-size:12px; color:var(--text-dim); }
+
+  /* Menú que aparece al mantener pulsado un punto del mapa */
+  /* width:max-content => el marcador no se estira al ancho del contenedor del mapa */
+  .lp-menu{ display:flex; align-items:center; gap:6px; padding:6px; border-radius:14px;
+    width:max-content; max-width:none; flex:none; }
+  .lp-btn{ border:none; cursor:pointer; font-family:'Roboto',sans-serif; font-size:12.5px; font-weight:600;
+    padding:8px 12px; border-radius:9px; color:#fff; background:#2f6df6; white-space:nowrap; transition:filter .15s; }
+  .lp-btn:hover{ filter:brightness(1.14); }
+  .lp-btn.lp-wp{ background:#a855f7; }
+  .lp-btn.lp-x{ background:rgba(255,255,255,0.16); padding:8px 10px; }
+
+  /* Botón "+ punto" del chip de ruta */
+  .rc-btn{ border:none; border-radius:18px; height:36px; padding:0 15px; background:rgba(168,85,247,0.55); color:#fff;
+    font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer; transition:filter .15s; }
+  .rc-btn:hover{ filter:brightness(1.15); }
+  .rc-btn.on{ background:#a855f7; }
+  .rc-btn.rc-mcdu{ background:rgba(14,165,233,0.5); }
+  .rc-btn.rc-x{ width:36px; padding:0; background:rgba(255,255,255,0.12); color:var(--text-dim); font-size:12px; }
+  .rc-btn:disabled{ opacity:.55; cursor:default; }
+
+  /* Aviso de hora de llegada (aparece 10s al crear/cambiar la ruta) */
+  #eta-toast{ position:absolute; top:78px; left:50%; transform:translateX(-50%); z-index:1700; padding:12px 20px; border-radius:14px; font-size:14.5px; font-weight:700; color:var(--text); white-space:nowrap; }
+  #eta-toast.hidden{ display:none; }
+
+  /* Buscador de aeropuertos */
+  #search-panel{ position:absolute; top:20px; left:50%; transform:translateX(-50%); z-index:1600; width:min(92vw,440px); }
+  #search-panel.hidden{ display:none; }
+  .sp-box{ border-radius:16px; padding:6px; }
+  .sp-top{ display:flex; align-items:center; gap:9px; padding:8px 10px; color:var(--text-dim); }
+  #sp-input{ flex:1; background:transparent; border:none; color:var(--text); font-size:15px; font-family:'Roboto',sans-serif; outline:none; }
+  #sp-close{ cursor:pointer; }
+  #sp-results{ max-height:52vh; overflow-y:auto; }
+  .sp-item{ display:flex; align-items:center; gap:12px; padding:9px 11px; border-radius:10px; cursor:pointer; }
+  .sp-item:hover{ background:rgba(255,255,255,0.08); }
+  .sp-item .sp-icao{ font-weight:700; font-size:14px; min-width:54px; color:var(--text); }
+  .sp-item .sp-name{ color:var(--text-dim); font-size:13px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Dos variantes de vidrio: paneles de datos (oscuro, legible) y barras flotantes (claro) */
+  .glass{ background:var(--glass-bg); border:1px solid var(--glass-brd);
+    backdrop-filter:blur(34px) saturate(190%); -webkit-backdrop-filter:blur(34px) saturate(190%);
+    box-shadow:0 22px 55px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.28); position:relative; }
+  .glass::before{ content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 42%); }
+  .glass.bar{ background:var(--bar-bg); border-color:var(--bar-brd);
+    box-shadow:0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.35); }
+
+  /* La columna entera hace scroll si no entra; así el panel de datos NUNCA se comprime
+     cuando se abre el gráfico (antes le cortaba las últimas filas). */
+  /* El escalado no cambia la caja que ocupa el elemento, solo cómo se ve. Por eso el
+     max-height se divide por la escala: si no, al achicar la UI el scroll saltaba antes
+     de tiempo aunque sobrara sitio en pantalla. */
+  #left-stack{ position:absolute; top:26px; left:26px; z-index:1000; width:346px; display:flex; flex-direction:column;
+    gap:12px; max-height:calc((100% - 52px) / var(--ui)); overflow-y:auto; scrollbar-width:none; padding-right:2px;
+    transform:scale(var(--ui)); transform-origin:top left; }
+  #left-stack::-webkit-scrollbar{ display:none; }
+
+  /* Barra de título: ahora vive fuera de la tarjeta de datos */
+
+  #panel{ width:100%; flex:none; border-radius:24px; color:var(--text); padding:20px 20px 18px; }
+
+
+  /* Dato principal: altitud y velocidad, uno al lado del otro */
+  .hero{ display:flex; gap:20px; }
+  .hero-cell{ flex:1; min-width:0; }
+  .hero-k{ display:block; font-size:11px; font-weight:500; color:var(--text-dim); }
+  /* flex-end en vez de baseline: los rodillos del odómetro recortan por abajo y su
+     "baseline" no es la de una cifra normal, así la unidad no queda flotando */
+  .hero-v{ display:flex; align-items:flex-end; gap:5px; margin-top:8px; }
+  .hero-v .u{ padding-bottom:0.1em; }
+  .hero-v .n{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:30px; font-weight:500; line-height:1; letter-spacing:-1px; }
+  .hero-v .u{ font-size:12px; color:var(--text-dim); }
+  .hero-sub{ display:block; font-size:11px; font-weight:400; color:var(--text-dim); margin-top:8px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hero-sub.green{ color:var(--green); } .hero-sub.orange{ color:var(--orange); }
+
+  /* Fila de fichas: rumbo, distancia, sim rate */
+  .tiles{ display:flex; gap:8px; margin-top:18px; }
+  .tile{ flex:1; min-width:0; padding:11px 12px; border-radius:14px; background:rgba(255,255,255,0.08); position:relative; }
+  .tile-k{ display:block; font-size:10.5px; font-weight:500; color:var(--text-dim); }
+  .tile-v{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:16px; font-weight:500; margin-top:7px; }
+  .tile-v{ display:flex; align-items:flex-end; }
+  .tile-v .uu{ font-family:'Archivo',sans-serif; font-size:10.5px; color:var(--text-dim); margin-left:3px; padding-bottom:0.15em; }
+  .tile-v.orange{ color:var(--orange); }
+  .tile-sub{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:10.5px; color:var(--text-dim); margin-top:4px; }
+  /* Los − + del sim rate viven dentro de la ficha, sin robarle sitio al número */
+  .tile-steps{ position:absolute; right:6px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:4px; }
+  .tile-steps button{ width:28px; height:24px; border:none; border-radius:8px; cursor:pointer;
+    background:rgba(255,255,255,0.14); color:var(--text); font-family:inherit; font-size:15px; font-weight:600;
+    line-height:1; display:flex; align-items:center; justify-content:center; padding:0; }
+  .tile-steps button:hover{ background:rgba(255,255,255,0.30); }
+
+  /* Filas de abajo: tiempo, combustible, clima */
+  .krow{ margin-top:15px; padding-top:15px; border-top:1px solid var(--row-border); }
+  .krow-line{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .krow-k{ font-size:12px; font-weight:500; color:var(--text-dim); }
+  .krow-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }
+  .krow-sub{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-top:9px; }
+  .wx-v{ display:flex; align-items:baseline; gap:9px; }
+  .wx-v .wx-sub{ font-size:11.5px; color:var(--text-dim); font-family:'Archivo',sans-serif; }
+  .fuel-bar{ height:8px; border-radius:4px; background:rgba(255,255,255,0.14); overflow:hidden; margin-top:11px; display:none; }
+  .fuel-fill{ display:block; height:100%; width:0%; border-radius:4px; background:#4ade80; box-shadow:0 0 14px rgba(74,222,128,0.5); transition:width .5s, background .5s; }
+
+  .panel-foot{ display:flex; gap:8px; margin-top:18px; }
+  .btn{ flex:1; height:46px; border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff;
+    font-family:inherit; font-size:13.5px; font-weight:600; border-radius:15px;
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.28); transition:background .15s; }
+  .btn:hover{ background:rgba(255,255,255,0.22); }
+  /* Botón cuadrado de luces, al lado de "Reiniciar ruta" */
+  .btn-sq{ width:46px; height:46px; flex:none; border:none; cursor:pointer; border-radius:15px;
+    background:rgba(255,255,255,0.10); color:var(--text-dim);
+    display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
+  .btn-sq:hover{ background:rgba(255,255,255,0.20); color:#fff; }
+  .btn-sq.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
+
+  /* Barra de progreso del vuelo (estilo Flightradar24) */
+  /* Por defecto vive arriba a la derecha, bajo la barra de herramientas */
+  #progress-panel{ width:348px; border-radius:24px; color:var(--text); padding:18px 20px 20px;
+    transform:scale(var(--ui)); transform-origin:top right; }
+  #progress-panel.hidden{ display:none; }
+  /* Suelto y arrastrable, el origen pasa a la esquina de arriba a la izquierda, que es
+     la que sigue al cursor */
+  #progress-panel.floating{ position:fixed; width:348px; z-index:1600; transform-origin:top left; }
+  #progress-panel .panel-head{ display:flex; align-items:center; gap:10px; margin-bottom:16px;
+    cursor:grab; user-select:none; -webkit-user-select:none; }
+  #progress-panel .panel-head:active{ cursor:grabbing; }
+  #progress-panel .panel-head h1{ flex:1; font-size:12px; font-weight:600; margin:0; color:var(--text-dim); }
+  #progress-panel .panel-head .logo{ display:none; }
+  #pg-caret{ color:rgba(246,248,251,0.45); flex:none; transition:transform .2s; }
+  #progress-panel.collapsed .panel-head{ margin-bottom:0; }
+  #progress-panel.collapsed #pg-caret{ transform:rotate(90deg); }
+  #progress-panel.collapsed .pg-body{ display:none; }
+  .pg-ends{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .pg-end{ display:flex; flex-direction:column; min-width:0; }
+  .pg-end.to{ align-items:flex-end; text-align:right; }
+  .pg-icao{ font-size:28px; font-weight:600; letter-spacing:-0.8px; line-height:1; }
+  .pg-city{ font-size:11px; line-height:1.3; color:var(--text-dim); font-weight:400; margin-top:6px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pg-mid{ display:flex; align-items:center; justify-content:center; flex:none; padding-top:2px; }
+  .pg-plane-badge{ width:34px; height:34px; border-radius:50%; background:rgba(251,191,36,0.9);
+    display:flex; align-items:center; justify-content:center; color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
+  #pg-badge-icon{ transition:transform .5s ease; }
+  .pg-track{ position:relative; height:8px; border-radius:4px; background:rgba(255,255,255,0.14); margin:20px 0 11px; overflow:hidden; }
+  .pg-fill{ position:absolute; left:0; top:0; height:100%; border-radius:4px; width:0%;
+    background:linear-gradient(90deg, rgba(251,191,36,0.5), #fbbf24); transition:width .6s; }
+  .pg-nums{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); font-weight:400; }
+  .pg-nums b{ color:var(--text); font-weight:600; }
+  .pg-rows{ display:flex; flex-direction:column; gap:11px; margin-top:18px; padding-top:16px; border-top:1px solid var(--row-border); }
+  .pg-brg{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; }
+  .pg-brg .pg-k{ color:var(--text-dim); font-weight:500; }
+  .pg-brg .pg-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13px; font-weight:500; color:var(--text); }
+  .pg-brg .pg-v.amber{ font-family:'Archivo',sans-serif; font-size:13px; font-weight:600; color:var(--amber); }
+  .pg-next{ margin-top:16px; padding:13px 14px; border-radius:16px;
+    background:rgba(125,211,252,0.12); border:1px solid rgba(125,211,252,0.20); }
+  .pg-next-head{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .pg-next-k{ font-size:10.5px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:rgba(186,230,253,0.65); }
+  .pg-next-name{ font-size:15px; font-weight:600; letter-spacing:-.2px; color:#e0f2fe; }
+  .pg-next-track{ position:relative; height:4px; border-radius:2px; background:rgba(255,255,255,0.16); margin-top:11px; }
+  /* Tres fichas: distancia (con sus dos unidades juntas), tiempo y rumbo */
+  .pg-next-nums{ display:flex; gap:8px; margin-top:11px; }
+  .pg-nx{ flex:1; min-width:0; text-align:center; padding:8px 4px 7px; border-radius:10px; background:rgba(255,255,255,0.07); }
+  .pg-nx b{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums;
+    font-size:15px; font-weight:500; color:#e0f2fe; white-space:nowrap; }
+  .pg-nx b em{ font-style:normal; font-family:'Archivo',sans-serif; font-size:9.5px;
+    font-weight:500; color:rgba(186,230,253,0.6); margin-left:3px; }
+  .pg-nx i{ display:block; font-style:normal; font-size:10px; font-weight:500;
+    color:rgba(186,230,253,0.6); margin-top:4px; white-space:nowrap; }
+  .pg-next-fill{ position:absolute; left:0; top:0; height:100%; width:0%; border-radius:2px; background:#7dd3fc; transition:width .6s; }
+
+
+  #legend{ position:absolute; bottom:20px; left:20px; z-index:1000; border-radius:18px; color:var(--text); }
+  #legend h2{ font-size:11px; letter-spacing:1.2px; text-transform:uppercase; color:var(--text-dim); margin:0 0 10px; font-weight:600; }
+  .leg-item{ display:flex; align-items:center; gap:10px; margin:7px 0; font-size:13px; font-weight:500; }
+  .leg-item .sw{ width:26px; height:5px; border-radius:3px; flex:none; }
+  #legend-toggle{ display:flex; align-items:center; gap:9px; padding:11px 13px; cursor:pointer; user-select:none; -webkit-user-select:none; }
+  #legend-toggle .grad{ width:20px; height:20px; border-radius:6px; flex:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.2); background:linear-gradient(180deg,#ef4444,#fb923c,#facc15,#4ade80,#38bdf8,#2f6df6); }
+  #legend-toggle .lt-label{ font-size:13px; font-weight:600; }
+  #legend-body{ padding:2px 17px 15px; }
+  #legend.collapsed #legend-body{ display:none; }
+
+  #tools{ position:absolute; top:26px; right:26px; z-index:1000; display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
+  .tool-row{ display:flex; gap:6px; border-radius:22px; padding:7px; }
+  .tool-btn{ width:46px; height:46px; border-radius:16px; border:none; cursor:pointer; background:transparent;
+    color:rgba(246,248,251,0.75); font-family:inherit;
+    display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
+  .tool-btn:hover{ color:#fff; background:rgba(255,255,255,0.16); }
+  .tool-btn.active{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.4); }
+  .tool-btn.active:hover{ background:#fcc94a; color:#1a1204; }
+  .tool-btn.disabled{ opacity:.3; cursor:default; }
+  .tool-btn.disabled:hover{ background:transparent; color:var(--text-dim); }
+
+  #layers{ border-radius:22px; padding:9px; width:252px; }
+  #layers.hidden{ display:none; }
+  .layer-opt{ display:flex; align-items:center; gap:12px; padding:8px; border-radius:12px; cursor:pointer; transition:background .15s; }
+  .layer-opt:hover{ background:rgba(255,255,255,0.07); }
+  .layer-opt .thumb{ width:40px; height:32px; border-radius:8px; flex:none; background-size:cover; background-position:center; border:1px solid rgba(255,255,255,0.18); }
+  .layer-opt .name{ color:var(--text); font-size:14px; font-weight:500; flex:1; }
+  .radio{ width:18px; height:18px; border-radius:50%; border:2px solid var(--text-dim); flex:none; position:relative; }
+  .layer-opt.sel .radio{ border-color:var(--accent); }
+  .layer-opt.sel .radio::after{ content:''; position:absolute; inset:3px; border-radius:50%; background:var(--accent); }
+  .divider{ height:1px; background:var(--row-border); margin:8px 6px; }
+  .toggle-opt{ display:flex; align-items:center; gap:12px; padding:8px; }
+  .toggle-opt .tico{ width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.08); flex:none; }
+  .toggle-opt .name{ color:var(--text); font-size:14px; font-weight:500; flex:1; }
+  .sw-toggle{ width:44px; height:26px; border-radius:13px; background:rgba(120,130,145,0.5); position:relative; cursor:pointer; transition:background .2s; flex:none; }
+  .sw-toggle::after{ content:''; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.4); transition:transform .2s; }
+  .sw-toggle.on{ background:#34c759; }
+  .sw-toggle.on::after{ transform:translateX(18px); }
+  .radius-row{ display:flex; align-items:center; gap:8px; padding:4px 10px 8px 56px; }
+  .radius-row .rr-label{ color:var(--text-dim); font-size:13px; font-weight:500; flex:1; }
+  .radius-row .rr-btn{ width:26px; height:26px; border-radius:8px; border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-size:16px; font-weight:600; display:flex; align-items:center; justify-content:center; }
+  .radius-row .rr-btn:hover{ background:rgba(255,255,255,0.2); }
+  .radius-row #rad-val{ font-size:12px; font-weight:600; min-width:96px; text-align:center; color:#fff; white-space:nowrap; }
+
+  /* Brújula: va justo encima de los botones de zoom (que miden 102px de alto con su hueco) */
+  #compass{ position:absolute; bottom:132px; right:26px; z-index:1000; width:54px; height:54px;
+    border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  #compass:hover{ filter:brightness(1.15); }
+  #compass-rose{ transition:transform .12s linear; }
+
+  #zoom{ position:absolute; bottom:26px; right:26px; z-index:1000; display:flex; flex-direction:column; gap:6px; }
+  #zoom button{ width:54px; height:48px; border:1px solid var(--bar-brd); border-radius:18px; cursor:pointer;
+    background:var(--bar-bg); backdrop-filter:blur(34px) saturate(190%); -webkit-backdrop-filter:blur(34px) saturate(190%);
+    box-shadow:0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.35);
+    color:#fff; font-family:inherit; font-size:22px; font-weight:300; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+  #zoom button:hover{ background:rgba(255,255,255,0.20); }
+
+  #bottom-center{ position:absolute; bottom:26px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; gap:10px; }
+  .chip{ border-radius:28px; padding:10px 12px 10px 18px; color:var(--text); font-size:13px; font-weight:500; display:flex; align-items:center; gap:12px; cursor:default; }
+  .chip .cv{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }
+  .chip .csep{ width:1px; height:15px; background:rgba(255,255,255,0.25); }
+
+  .acft-inner{ line-height:0; } .acft-inner svg{ display:block; }
+  .plane-me svg{ filter:drop-shadow(0 2px 5px rgba(0,0,0,0.85)); }
+  .plane-traffic svg{ filter:drop-shadow(0 1px 3px rgba(0,0,0,0.7)); }
+  .apt-label{ transform:translate(9px,-9px); background:rgba(15,23,42,0.72); color:#fff; font-size:11px; font-weight:600; letter-spacing:.3px; padding:2px 7px; border-radius:7px; border:1px solid rgba(255,255,255,0.22); white-space:nowrap; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 2px 8px rgba(0,0,0,0.4); cursor:pointer; }
+  .vor-mk{ cursor:pointer; line-height:0; filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
+  .apt-pin{ cursor:pointer; width:40px; height:40px; display:flex; align-items:flex-end; justify-content:center; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.55)); }
+  /* Fundido de los que aparecen por zoom: sin esto entran y salen de golpe */
+  .apt-pin[data-view="1"], .vor-mk[data-view="1"]{ transition:opacity .28s ease; }
+  .wp-mk{ cursor:pointer; width:38px; height:38px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .pp-actions{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .pp-actions button{ flex:1; border:none; cursor:pointer; font-family:'Roboto',sans-serif; font-size:12px; font-weight:600; padding:8px 6px; border-radius:9px; color:#fff; transition:filter .15s; }
+  .pp-actions button:hover{ filter:brightness(1.12); }
+  .pp-btn-route{ background:#2f6df6; }
+  .pp-btn-tp{ background:rgba(255,255,255,0.16); }
+  .pp-btn-remove{ background:#ef4444; }
+  .pp-btn-gen{ background:#0ea5e9; }
+  .pp-btn-wp{ background:#a855f7; }
+  .pp-actions button:disabled{ opacity:.6; cursor:default; }
+
+  .maplibregl-popup-content{ background:var(--glass-bg); color:var(--text); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
+    border:1px solid var(--glass-brd); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+    font-family:'Roboto',sans-serif; font-size:13px; line-height:1.5; padding:11px 14px; }
+  .maplibregl-popup-tip{ display:none; }
+  .maplibregl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
+  .apt-photo{ width:100%; height:auto; border-radius:9px; display:block; margin-bottom:8px; }
+
+#map img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:saturate(1.1) brightness(.85)}
+#status-modal{z-index:2200}
+</style></head><body>
+<div id="map"><img src="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=-76.4,5.0,-74.4,6.6&bboxSR=4326&size=1600,900&format=jpg&f=image" alt=""></div>
+<div id="left-stack">
+  <div id="panel" class="glass">
+    <div class="hero">
+      <div class="hero-cell">
+        <span class="hero-k">Altitud</span>
+        <span class="hero-v"><span class="n" id="v-alt">--</span><span class="u">ft</span></span>
+        <span class="hero-sub" id="v-vs">--</span>
+      </div>
+      <div class="hero-cell">
+        <span class="hero-k">Velocidad</span>
+        <span class="hero-v"><span class="n" id="v-gs">--</span><span class="u">kt</span></span>
+        <span class="hero-sub" id="s-gs">--</span>
+      </div>
+    </div>
+
+    <div class="tiles">
+      <span class="tile"><span class="tile-k">Rumbo</span><span class="tile-v" id="v-hdg">--</span></span>
+      <span class="tile"><span class="tile-k">Distancia</span><span class="tile-v"><span id="v-dist">--</span><span class="uu">NM</span></span><span class="tile-sub" id="s-dist"></span></span>
+      <span class="tile"><span class="tile-k">Sim rate</span><span class="tile-v" id="v-simrate">1×</span>
+        <span class="tile-steps">
+          <button id="sr-plus" title="Subir velocidad de simulación">+</button>
+          <button id="sr-minus" title="Bajar velocidad de simulación">−</button>
+        </span></span>
+    </div>
+
+    <div class="krow"><div class="krow-line"><span class="krow-k">Tiempo de vuelo</span><span class="krow-v" id="v-time">00:00:00</span></div></div>
+
+    <div class="krow">
+      <div class="krow-line"><span class="krow-k">Combustible</span><span class="krow-v" id="v-fuel">--</span></div>
+      <div class="fuel-bar" id="fuel-bar"><span class="fuel-fill" id="fuel-fill"></span></div>
+      <div class="krow-sub"><span id="s-fuel"></span><span id="s-endur"></span></div>
+    </div>
+
+    <div class="krow"><div class="krow-line"><span class="krow-k" id="wx-label">Clima real</span>
+      <span class="wx-v"><span class="krow-v" id="v-wx">--</span><span class="wx-sub" id="s-wx"></span></span></div></div>
+
+    <div class="panel-foot">
+      <button id="btn-status" class="btn-sq" title="Luces del avión"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.6l.1.6h5.2l.1-.6c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3z"/></svg></button>
+      <button class="btn" id="btn-reset"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Reiniciar ruta</button>
+    </div>
+  </div>
+
+  <div id="graph-panel" class="glass">
+  <div class="gp-head"><span>Velocidad y altitud</span><span id="gp-close">✕</span></div>
+  <div class="gp-body"><canvas id="graph-canvas"></canvas></div>
+</div>
+</div>
+<div id="tools"><div class="tool-row glass bar">
+    <button class="tool-btn" id="btn-layers" title="Capas"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></button>
+    <button class="tool-btn active" id="btn-center" title="Seguir al avión"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke-linecap="round"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></button>
+    <button class="tool-btn active" id="btn-3d" title="Vista 2D / 3D" style="font-weight:700;font-size:12.5px;">3D</button>
+    <button class="tool-btn disabled" id="btn-progress" title="Progreso del vuelo (necesita una ruta)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-6 3 12 3-6h5"/></svg></button>
+    <button class="tool-btn" id="btn-fail" title="Averías"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></button>
+    <button class="tool-btn" id="btn-hist" title="Historial de vuelos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/></svg></button>
+    <button class="tool-btn active" id="btn-graph" title="Gráfico de velocidad y altitud"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M6 15l4-5 3 3 5-7"/></svg></button>
+    <button class="tool-btn" id="btn-search" title="Buscar aeropuerto"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
+  </div><div id="progress-panel" class="glass">
+    <div class="panel-head" id="pg-head">
+      <span class="logo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-6 3 12 3-6h5"/></svg></span>
+      <h1>Progreso del vuelo</h1>
+      <svg id="pg-caret" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h14M5 15h14"/></svg>
+    </div>
+    <div class="pg-body">
+      <div class="pg-ends">
+        <span class="pg-end from"><span class="pg-icao" id="pg-from">----</span><span class="pg-city" id="pg-from-name"></span></span>
+          <span class="pg-mid"><span class="pg-plane-badge" id="pg-badge" title="Fase del vuelo"><svg id="pg-badge-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg></span></span>
+        <span class="pg-end to"><span class="pg-icao" id="pg-to">----</span><span class="pg-city" id="pg-to-name"></span></span>
+      </div>
+      <div class="pg-track"><span class="pg-fill" id="pg-fill"></span></div>
+      <div class="pg-nums"><span id="pg-done"></span><span id="pg-left"></span></div>
+      <div class="pg-rows">
+        <div class="pg-brg"><span class="pg-k">Rumbo a seguir</span><span class="pg-v amber" id="pg-brg">---°</span></div>
+        <div class="pg-brg"><span class="pg-k">Llegada estimada</span><span class="pg-v" id="pg-eta">--:--</span></div>
+        <div class="pg-brg" id="pg-vnav-row"><span class="pg-k">Inicio del descenso</span><span class="pg-v" id="pg-vnav">--</span></div>
+        <div class="pg-brg" id="pg-vs-row"><span class="pg-k">Bajar a</span><span class="pg-v" id="pg-vs">--</span></div>
+        <div class="pg-brg" id="pg-spd-row"><span class="pg-k">Velocidad</span><span class="pg-v" id="pg-spd">--</span></div>
+      </div>
+      <div id="pg-next-row" class="pg-next">
+        <div class="pg-next-head"><span class="pg-next-k">Próximo punto</span><span class="pg-next-name" id="pg-next">--</span></div>
+        <div class="pg-next-track"><span class="pg-next-fill" id="pg-next-fill"></span></div>
+        <div class="pg-next-nums">
+          <span class="pg-nx"><b><span id="pg-next-nm">--</span><em>NM</em></b><i id="pg-next-km">-- km</i></span>
+          <span class="pg-nx"><b><span id="pg-next-min">--</span><em>min</em></b><i>a esa velocidad</i></span>
+          <span class="pg-nx"><b><span id="pg-next-brg">---°</span></b><i id="pg-next-card">rumbo</i></span>
+        </div>
+      </div>
+    </div>
+  </div></div>
+<div id="compass" class="glass bar" title="Volver al norte">
+  <svg id="compass-rose" width="36" height="36" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="14" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
+    <path d="M16 5 L20 17 L16 15 L12 17 Z" fill="#ef4444"/>
+    <path d="M16 27 L12 15 L16 17 L20 15 Z" fill="#ffffff"/>
+    <text x="16" y="4.2" text-anchor="middle" font-family="Archivo,sans-serif" font-size="6.5" font-weight="700" fill="#fff">N</text>
+  </svg>
+</div><div id="zoom"><button id="zin">+</button><button id="zout">−</button></div>
+<div id="status-modal" >
+  <div class="st-card glass">
+    <div class="ed-head"><span>Luces y vista</span><span id="st-close">✕</span></div>
+    <div class="off-box">
+      <div class="off-top"><span class="off-k">Centrado del avión</span><span class="off-v" id="off-val">centrado</span></div>
+      <input id="off-x" type="range" min="-220" max="220" step="10" value="120">
+      <div class="off-scale"><span>izquierda</span><button id="off-reset" class="off-reset">por defecto</button><span>derecha</span></div>
+    </div>
+    <div class="off-box">
+      <div class="off-top"><span class="off-k">Tamaño de los paneles</span><span class="off-v" id="ui-val">100%</span></div>
+      <input id="ui-scale" type="range" min="0.6" max="1.3" step="0.1" value="1">
+      <div class="off-scale"><span>60%</span><button id="ui-reset" class="off-reset">normal</button><span>130%</span></div>
+    </div>
+    <div id="st-body"></div>
+  </div>
+</div>
+<script>
+const ODO_DIGITOS='<span class="od"><span class="od-r">'
+  +[0,1,2,3,4,5,6,7,8,9].map(d=>'<span>'+d+'</span>').join('')+'</span></span>';
+function odoForma(s){ return [...s].map(c=>/[0-9]/.test(c)?'#':c).join(''); }
+function setOdo(id,valor){
+  const el=document.getElementById(id); if(!el) return;
+  const s=String(valor);
+  if(!el.classList.contains('odo')) el.classList.add('odo');
+  const forma=odoForma(s);
+  if(el.dataset.forma!==forma){
+    el.innerHTML=[...s].map(c=>/[0-9]/.test(c)?ODO_DIGITOS:'<span class="od-f">'+c+'</span>').join('');
+    el.dataset.forma=forma;
+    // Sin este reflow el navegador junta el "nacer" con el "moverse" y no se ve rodar
+    void el.offsetHeight;
+  }
+  const tiras=el.querySelectorAll('.od-r'); let k=0;
+  for(const c of s){
+    if(!/[0-9]/.test(c)) continue;
+    const t=tiras[k++]; if(t) t.style.transform='translateY(-'+c+'em)';
+  }
+}
+// Escribe una de las dos líneas chicas bajo el dato grande (altitud / velocidad)
+function setSub(id,v,cls){ const e=document.getElementById(id); if(!e) return; e.textContent=v; e.className='hero-sub'+(cls?' '+cls:''); }
+
+const ALT_STOPS=[
+  [0,     [255,255,255]],   // blanco     · menos de 100 m
+  [330,   [250,204,21]],    // amarillo
+  [3300,  [74,222,128]],    // verde
+  [8200,  [56,189,248]],    // celeste    · desde 2500 m
+  [16000, [37,99,235]],     // azul
+  [28000, [30,58,138]],     // azul oscuro · acá cae el crucero típico
+  [40000, [124,58,237]],    // violeta
+  [48000, [239,68,68]],     // rojo        · muy alto, casi nunca
+];
+function altColor(ft){ ft=ft||0;
+  if(ft<=ALT_STOPS[0][0]) return 'rgb('+ALT_STOPS[0][1].join(',')+')';
+  for(let i=0;i<ALT_STOPS.length-1;i++){ const a=ALT_STOPS[i], b=ALT_STOPS[i+1];
+    if(ft<=b[0]){ const k=(ft-a[0])/(b[0]-a[0]);
+      return 'rgb('+Math.round(a[1][0]+(b[1][0]-a[1][0])*k)+','+Math.round(a[1][1]+(b[1][1]-a[1][1])*k)+','+Math.round(a[1][2]+(b[1][2]-a[1][2])*k)+')'; } }
+  return 'rgb('+ALT_STOPS[ALT_STOPS.length-1][1].join(',')+')'; }
+
+const nf=n=>n.toLocaleString('en-US');
+
+// ---- Distancias ----
+// Regla de la casa: donde se vea una distancia se ven LAS DOS unidades, siempre en el
+// mismo orden (km primero, NM después). Todo pasa por acá para que no se escape ninguna.
+const KM_POR_NM=1.852;
+function km(nm){ return Math.round((nm||0)*KM_POR_NM); }
+function fmtDist(nm){ return nf(km(nm))+' km · '+Math.round(nm||0)+' NM'; }
+// Igual pero con los km resaltados, para las líneas donde el km es el dato principal
+function fmtDistB(nm){ return '<b>'+nf(km(nm))+' km</b> · '+Math.round(nm||0)+' NM'; }
+
+
+function txt(id,v){var e=document.getElementById(id);if(e)e.textContent=v}
+function setSub(id,v,c){var e=document.getElementById(id);if(!e)return;e.textContent=v;e.className='hero-sub'+(c?' '+c:'')}
+txt('pg-from','SKRG');txt('pg-from-name','José María Córdova');txt('pg-to','SKPE');txt('pg-to-name','Matecaña Intl');
+txt('pg-brg','197° SSO');txt('pg-eta','14:52 · 26m');txt('pg-vnav','en '+fmtDist(33));txt('pg-vs','−1,450 ft/min');txt('pg-spd','libre sobre 10.000 ft');
+txt('pg-next','RNG');txt('pg-next-nm','23');txt('pg-next-km',nf(km(23))+' km');txt('pg-next-min','5');txt('pg-next-brg','197°');txt('pg-next-card','SSO');
+txt('wx-label','Clima real · SKRG');txt('v-wx','19°C');txt('s-wx','7 kt · 220°');txt('s-fuel','9,388 L');txt('s-endur','3h 05m restantes');
+setOdo('v-alt','18,240');setOdo('v-gs','341');setOdo('v-hdg','197°');setOdo('v-dist','64.2');setOdo('v-time','00:19:32');setOdo('v-fuel','2,480 gal');setOdo('v-simrate','4×');
+document.getElementById('v-simrate').classList.add('orange');
+setSub('v-vs','↑ 1,150 ft/min  ·  5,559 m','green');setSub('s-gs','M 0.62  ·  632 km/h');txt('s-dist','119 km');
+document.getElementById('fuel-bar').style.display='block';document.getElementById('fuel-fill').style.width='64%';
+document.getElementById('pg-fill').style.width='38%';document.getElementById('pg-next-fill').style.width='55%';
+document.getElementById('pg-done').innerHTML=fmtDistB(64);document.getElementById('pg-left').innerHTML=fmtDistB(104)+' · 00:26';
+document.getElementById('pg-badge-icon').style.transform='rotate(45deg)';
+document.getElementById('btn-status').classList.add('on');
+document.getElementById('btn-progress').classList.remove('disabled');document.getElementById('btn-progress').classList.add('active');
+document.getElementById('st-body').innerHTML='<div class="st-row" style="border-bottom:none"><span class="st-chips">'
+ +['Aterrizaje','Taxi','Beacon','Strobe','Navegación'].map((n,i)=>'<span class="st-chip'+(i<2?' on':'')+'">'+n+'</span>').join('')+'</span></div>';
+// los dos sliders, funcionando
+var ox=document.getElementById('off-x'),ov=document.getElementById('off-val');
+function po(){var v=+ox.value;ov.textContent=v===0?'centrado':(Math.abs(v)+' px a la '+(v>0?'derecha':'izquierda'));}
+ox.value=120;po();ox.oninput=po;document.getElementById('off-reset').onclick=function(){ox.value=120;po();};
+var us=document.getElementById('ui-scale'),uv=document.getElementById('ui-val');
+function pu(){var k=parseFloat(us.value);document.documentElement.style.setProperty('--ui',k);uv.textContent=Math.round(k*100)+'%';if(window.ch)setTimeout(()=>ch.resize(),260);}
+us.oninput=pu;document.getElementById('ui-reset').onclick=function(){us.value=1;pu();};pu();
+document.getElementById('st-close').onclick=function(){document.getElementById('status-modal').style.display='none';};
+var h=[];for(var i=0;i<60;i++)h.push({alt:Math.round(38000*Math.min(1,i/40)),gs:Math.round(60+300*Math.min(1,i/28))});
+window.ch=new Chart(document.getElementById('graph-canvas'),{type:'line',
+ data:{labels:h.map((_,i)=>i%10?'':(9+Math.floor(i/10))+':00'),datasets:[
+  {data:h.map(x=>x.gs),borderColor:'rgba(251,191,36,.55)',yAxisID:'y1',pointRadius:0,borderWidth:1.6,tension:.25},
+  {data:h.map(x=>x.alt),yAxisID:'y',pointRadius:0,borderWidth:2.6,tension:.25,segment:{borderColor:c=>altColor((h[c.p1DataIndex]||{}).alt)}}]},
+ options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},
+  scales:{x:{ticks:{color:'rgba(246,248,251,.45)',maxTicksLimit:6,font:{size:10}},grid:{color:'rgba(255,255,255,.05)'}},
+   y:{position:'left',min:0,ticks:{color:'rgba(246,248,251,.45)',maxTicksLimit:5,font:{size:10},callback:v=>v>=1000?(v/1000)+'k':v},grid:{color:'rgba(255,255,255,.05)'}},
+   y1:{position:'right',min:0,ticks:{color:'rgba(251,191,36,.5)',maxTicksLimit:5,font:{size:10}},grid:{drawOnChartArea:false}}}}});
+<\/script></body></html>

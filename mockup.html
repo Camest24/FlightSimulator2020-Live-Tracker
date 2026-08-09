@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup - MSFS Live Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --glass-bg: rgba(22,26,34,0.42);
+    --glass-brd: rgba(255,255,255,0.18);
+    --row-border: rgba(255,255,255,0.09);
+    --text: #f4f6fa;
+    --text-dim: #b3bccb;
+    --accent: #3b82f6;
+    --green: #4ade80;
+    --orange: #fb923c;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; font-family:'Roboto',sans-serif; overflow:hidden; background:#0b0e14; }
+  #map{ position:absolute; inset:0; z-index:1; background:#0b0e14; }
+  .maplibregl-ctrl-attrib, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left{ display:none !important; }
+
+  /* Pantalla de espera (tapa el mapa hasta tener una posición real, no el 0,0 del menú) */
+  #waiting{ position:absolute; inset:0; z-index:2000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; text-align:center; color:var(--text); background:rgba(11,14,20,0.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); transition:opacity .4s; }
+  #waiting.hidden{ opacity:0; pointer-events:none; }
+  #waiting .w-logo{ color:#fff; opacity:.92; }
+  #waiting h2{ margin:0; font-size:22px; font-weight:700; letter-spacing:-0.2px; }
+  #waiting p{ margin:0; color:var(--text-dim); font-size:14px; }
+  .w-spinner{ width:34px; height:34px; border-radius:50%; border:3px solid rgba(255,255,255,0.18); border-top-color:#3b82f6; animation:spin .9s linear infinite; margin-top:8px; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* Panel del gráfico de velocidad/altitud */
+  #graph-panel{ position:absolute; left:20px; right:20px; bottom:20px; height:230px; z-index:1500; border-radius:16px; padding:12px 16px 14px; color:var(--text); display:flex; flex-direction:column; }
+  #graph-panel.hidden{ display:none; }
+  .gp-head{ display:flex; align-items:center; justify-content:space-between; font-size:11px; font-weight:600; letter-spacing:1px; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; }
+  #gp-close{ cursor:pointer; font-size:15px; opacity:.7; }
+  .gp-body{ flex:1; position:relative; }
+
+  /* Botón de editar (junto a la altitud) + modal de ajuste */
+  .row-edit{ margin-left:10px; width:30px; height:30px; border:none; border-radius:8px; background:rgba(255,255,255,0.12); color:var(--text-dim); cursor:pointer; flex:none; display:flex; align-items:center; justify-content:center; }
+  .row-edit:hover{ background:rgba(255,255,255,0.22); color:#fff; }
+  #editor{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #editor.hidden{ display:none; }
+  .ed-card{ width:min(92vw,430px); border-radius:20px; padding:18px 20px 20px; color:var(--text); }
+  .ed-head{ display:flex; justify-content:space-between; align-items:center; font-size:17px; font-weight:700; margin-bottom:14px; }
+  .ed-beta{ color:var(--text-dim); font-weight:500; font-size:12px; }
+  #ed-close{ cursor:pointer; opacity:.7; font-size:16px; }
+  .ed-row{ margin-bottom:13px; }
+  .ed-label{ display:block; font-size:13px; color:var(--text-dim); font-weight:600; margin-bottom:6px; }
+  .ed-ctrl{ display:flex; align-items:center; gap:6px; }
+  .ed-ctrl button{ min-width:52px; height:46px; border:none; border-radius:11px; background:rgba(255,255,255,0.12); color:#fff; font-size:14px; font-weight:700; cursor:pointer; }
+  .ed-ctrl button:hover{ background:rgba(255,255,255,0.22); }
+  .ed-ctrl input{ flex:1; min-width:64px; height:46px; text-align:center; border:none; border-radius:11px; background:rgba(255,255,255,0.08); color:#fff; font-size:19px; font-weight:700; font-family:'Roboto',sans-serif; }
+  #ed-apply{ margin-top:6px; }
+
+  /* Pegar una ruta escrita */
+  #route-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #route-modal.hidden{ display:none; }
+  .rt-card{ width:min(94vw,540px); border-radius:20px; padding:18px 20px 20px; color:var(--text); }
+  .rt-help{ font-size:12.5px; color:var(--text-dim); margin:0 0 12px; line-height:1.5; }
+  #rt-input{ width:100%; height:76px; resize:vertical; border:none; border-radius:12px; padding:11px 13px;
+    background:rgba(255,255,255,0.08); color:var(--text); font-family:'Roboto',monospace; font-size:14.5px;
+    letter-spacing:.4px; outline:none; }
+  #rt-input::placeholder{ color:rgba(255,255,255,0.3); }
+  .rt-msg{ font-size:12.5px; margin:10px 2px 12px; min-height:17px; line-height:1.55; }
+  .rt-msg .ok{ color:#4ade80; } .rt-msg .warn{ color:#fb923c; } .rt-msg .dim{ color:var(--text-dim); }
+
+  /* Averías */
+  #fail-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #fail-modal.hidden{ display:none; }
+  .fail-card{ width:min(94vw,520px); max-height:84vh; border-radius:20px; padding:18px 20px 18px; color:var(--text); display:flex; flex-direction:column; }
+  .fail-when{ margin-bottom:14px; }
+  .fail-k{ display:block; font-size:12.5px; color:var(--text-dim); font-weight:600; margin-bottom:8px; }
+  .fail-ctrl{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .fail-mode{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-family:inherit;
+    font-size:13px; font-weight:600; padding:8px 13px; border-radius:10px; }
+  .fail-mode.on{ background:#2f6df6; }
+  #fail-min{ width:76px; height:35px; border:none; border-radius:10px; background:rgba(255,255,255,0.08);
+    color:#fff; text-align:center; font-family:inherit; font-size:13px; font-weight:600; outline:none; }
+  #fail-body{ overflow-y:auto; display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .fail-item{ display:flex; align-items:center; gap:9px; padding:10px 11px; border-radius:11px; cursor:pointer;
+    background:rgba(255,255,255,0.06); font-size:13px; font-weight:500; transition:background .15s; }
+  .fail-item:hover{ background:rgba(239,68,68,0.22); }
+  .fail-item .fi-ico{ width:16px; height:16px; flex:none; color:#fca5a5; }
+  #fail-queue{ margin-top:12px; }
+  .fq-item{ display:flex; align-items:center; gap:10px; padding:9px 4px; border-top:1px solid var(--row-border); font-size:12.5px; }
+  .fq-name{ flex:1; }
+  .fq-time{ font-weight:700; color:#fb923c; font-variant-numeric:tabular-nums; }
+  .fq-cancel{ border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff; border-radius:8px;
+    font-size:11.5px; font-weight:600; padding:5px 9px; }
+
+  /* Menú de rutas alternativas */
+  #opts-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #opts-modal.hidden{ display:none; }
+  #opts-body{ max-height:62vh; overflow-y:auto; }
+  .opt-item{ display:flex; align-items:center; gap:12px; padding:12px 10px; border-radius:12px; cursor:pointer;
+    border:1px solid transparent; transition:background .15s; }
+  .opt-item:hover{ background:rgba(255,255,255,0.08); border-color:var(--border-strong); }
+  .opt-main{ flex:1; min-width:0; }
+  .opt-awy{ font-size:14.5px; font-weight:700; letter-spacing:.3px; color:#7dd3fc; }
+  .opt-pts{ font-size:12px; color:var(--text-dim); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .opt-nums{ text-align:right; font-size:13.5px; font-weight:700; white-space:nowrap; }
+  .opt-nums span{ display:block; font-size:11.5px; font-weight:500; color:var(--text-dim); margin-top:2px; }
+
+  /* Historial de vuelos */
+  #hist-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #hist-modal.hidden{ display:none; }
+  .hist-card{ width:min(94vw,520px); max-height:80vh; border-radius:20px; padding:18px 20px 16px; color:var(--text); display:flex; flex-direction:column; }
+  #hist-body{ overflow-y:auto; margin-right:-6px; padding-right:6px; }
+  .hist-item{ display:flex; align-items:center; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
+  .hist-main{ flex:1; min-width:0; }
+  .hist-route{ font-size:15px; font-weight:700; letter-spacing:-0.2px; }
+  .hist-sub{ font-size:12px; color:var(--text-dim); margin-top:3px; }
+  .hist-nums{ text-align:right; font-size:13px; font-weight:600; white-space:nowrap; }
+  .hist-nums span{ display:block; font-size:11.5px; color:var(--text-dim); font-weight:500; margin-top:2px; }
+  .hist-del{ border:none; cursor:pointer; background:rgba(239,68,68,0.16); color:#fca5a5; width:30px; height:30px;
+    border-radius:9px; font-size:15px; flex:none; display:flex; align-items:center; justify-content:center; }
+  .hist-del:hover{ background:rgba(239,68,68,0.3); }
+  .hist-empty{ color:var(--text-dim); font-size:14px; padding:22px 4px; text-align:center; }
+
+  /* Panel de estado del avión */
+  #status-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #status-modal.hidden{ display:none; }
+  .st-card{ width:min(92vw,430px); border-radius:20px; padding:18px 20px 20px; color:var(--text); }
+  .st-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
+  .st-label{ color:var(--text-dim); font-size:14px; font-weight:500; }
+  .st-val{ font-size:14px; font-weight:600; text-align:right; }
+  .st-val.on{ color:#4ade80; } .st-val.off{ color:var(--text-dim); }
+  .st-chips{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .st-chip{ font-size:11px; font-weight:600; padding:5px 9px; border-radius:7px; background:rgba(255,255,255,0.1); color:var(--text-dim); cursor:pointer; }
+  .st-chip.on{ background:rgba(52,199,89,0.25); color:#7ee2a0; }
+  .st-mid{ display:flex; align-items:center; gap:8px; }
+  .st-btn{ border:none; border-radius:8px; background:rgba(255,255,255,0.14); color:#fff; font-size:12px; font-weight:700; padding:6px 11px; cursor:pointer; }
+  .st-btn:hover{ background:rgba(255,255,255,0.24); }
+  .st-btn.st-green{ background:rgba(52,199,89,0.28); color:#7ee2a0; }
+  .st-btn.st-red{ background:rgba(239,68,68,0.22); color:#fca5a5; }
+
+  /* Contador de bajada de tren (teleporte de despegue) */
+  #gear-wait{ position:absolute; inset:0; z-index:2200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); }
+  #gear-wait.hidden{ display:none; }
+  .gw-card{ border-radius:20px; padding:26px 34px; text-align:center; color:var(--text); display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .gw-title{ font-size:15px; font-weight:600; margin-top:8px; }
+  .gw-pct{ font-size:42px; font-weight:800; color:#38bdf8; line-height:1.1; }
+  .gw-sub{ font-size:12px; color:var(--text-dim); }
+
+  /* Menú que aparece al mantener pulsado un punto del mapa */
+  /* width:max-content => el marcador no se estira al ancho del contenedor del mapa */
+  .lp-menu{ display:flex; align-items:center; gap:6px; padding:6px; border-radius:14px;
+    width:max-content; max-width:none; flex:none; }
+  .lp-btn{ border:none; cursor:pointer; font-family:'Roboto',sans-serif; font-size:12.5px; font-weight:600;
+    padding:8px 12px; border-radius:9px; color:#fff; background:#2f6df6; white-space:nowrap; transition:filter .15s; }
+  .lp-btn:hover{ filter:brightness(1.14); }
+  .lp-btn.lp-wp{ background:#a855f7; }
+  .lp-btn.lp-x{ background:rgba(255,255,255,0.16); padding:8px 10px; }
+
+  /* Botón "+ punto" del chip de ruta */
+  .rc-btn{ border:none; border-radius:8px; background:rgba(255,255,255,0.14); color:#fff; font-size:12px; font-weight:600; padding:4px 9px; cursor:pointer; }
+  .rc-btn.on{ background:#a855f7; }
+  .rc-btn.rc-mcdu{ background:rgba(14,165,233,0.35); }
+  .rc-btn.rc-mcdu:hover{ background:rgba(14,165,233,0.55); }
+  .rc-btn:disabled{ opacity:.55; cursor:default; }
+
+  /* Aviso de hora de llegada (aparece 10s al crear/cambiar la ruta) */
+  #eta-toast{ position:absolute; top:78px; left:50%; transform:translateX(-50%); z-index:1700; padding:12px 20px; border-radius:14px; font-size:14.5px; font-weight:700; color:var(--text); white-space:nowrap; }
+  #eta-toast.hidden{ display:none; }
+
+  /* Buscador de aeropuertos */
+  #search-panel{ position:absolute; top:20px; left:50%; transform:translateX(-50%); z-index:1600; width:min(92vw,440px); }
+  #search-panel.hidden{ display:none; }
+  .sp-box{ border-radius:16px; padding:6px; }
+  .sp-top{ display:flex; align-items:center; gap:9px; padding:8px 10px; color:var(--text-dim); }
+  #sp-input{ flex:1; background:transparent; border:none; color:var(--text); font-size:15px; font-family:'Roboto',sans-serif; outline:none; }
+  #sp-close{ cursor:pointer; }
+  #sp-results{ max-height:52vh; overflow-y:auto; }
+  .sp-item{ display:flex; align-items:center; gap:12px; padding:9px 11px; border-radius:10px; cursor:pointer; }
+  .sp-item:hover{ background:rgba(255,255,255,0.08); }
+  .sp-item .sp-icao{ font-weight:700; font-size:14px; min-width:54px; color:var(--text); }
+  .sp-item .sp-name{ color:var(--text-dim); font-size:13px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .glass{ background:var(--glass-bg); border:1px solid var(--glass-brd);
+    backdrop-filter:blur(26px) saturate(180%); -webkit-backdrop-filter:blur(26px) saturate(180%);
+    box-shadow:0 14px 44px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(255,255,255,0.05); position:relative; }
+  .glass::before{ content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(160deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0) 42%); }
+
+  #left-stack{ position:absolute; top:20px; left:20px; z-index:1000; width:344px; display:flex; flex-direction:column; gap:12px; max-height:calc(100% - 40px); }
+  #panel{ width:100%; border-radius:22px; color:var(--text); overflow:hidden; }
+  .panel-head{ display:flex; align-items:center; gap:12px; padding:16px 20px; border-bottom:1px solid var(--row-border); }
+  .panel-head .logo{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; color:#fff; }
+  .panel-head h1{ font-size:18px; font-weight:700; margin:0; letter-spacing:-0.2px; flex:1; }
+  .panel-head{ cursor:pointer; user-select:none; -webkit-user-select:none; }
+  #panel-caret{ color:var(--text-dim); flex:none; transition:transform .2s; transform:rotate(180deg); }
+  #panel.collapsed #panel-caret{ transform:rotate(0deg); }
+  #panel.collapsed{ width:auto; }
+  #panel.collapsed .panel-head{ border-bottom:none; }
+  #panel.collapsed .row, #panel.collapsed .panel-foot{ display:none; }
+  #row-alt{ cursor:pointer; }
+  #row-alt.collapsed .sub{ display:none; }
+  .pill{ font-size:11px; font-weight:600; padding:4px 9px; border-radius:20px; display:flex; align-items:center; gap:6px; white-space:nowrap; }
+  .pill .dot{ width:7px; height:7px; border-radius:50%; }
+  .pill.ok{ background:rgba(52,199,89,0.18); color:#7ee2a0; }
+  .pill.ok .dot{ background:#34c759; box-shadow:0 0 6px #34c759; }
+  .pill.waiting{ background:rgba(251,146,60,0.18); color:#fbbf76; }
+  .pill.waiting .dot{ background:#fb923c; animation:pulse 1.4s infinite; }
+  @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  .row{ display:flex; align-items:center; gap:12px; padding:11px 20px; border-bottom:1px solid var(--row-border); }
+  .row .ico{ width:18px; height:18px; color:var(--text-dim); flex:none; }
+  .row .label{ color:var(--text-dim); font-size:14px; font-weight:500; }
+  .row .val{ margin-left:auto; display:flex; flex-direction:column; align-items:flex-end; line-height:1.18; }
+  .val .v-main{ font-size:15px; font-weight:600; }
+  .val .sub{ color:var(--text-dim); font-size:12px; font-weight:500; }
+  .v-main.green{ color:var(--green); } .v-main.orange{ color:var(--orange); }
+  .fuel-bar{ width:120px; height:6px; border-radius:3px; background:rgba(255,255,255,0.16); overflow:hidden; margin-top:4px; display:none; }
+  .fuel-fill{ display:block; height:100%; width:0%; border-radius:3px; background:#4ade80; transition:width .5s, background .5s; }
+  .wline{ display:flex; align-items:center; gap:10px; }
+
+  .panel-foot{ padding:14px 20px 16px; }
+  .btn{ width:100%; border:none; cursor:pointer; background:linear-gradient(180deg,#4c8bff,#2f6df6); color:#fff;
+    font-family:inherit; font-size:15px; font-weight:600; padding:13px; border-radius:13px;
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    box-shadow:0 6px 18px rgba(47,109,246,0.4), inset 0 1px 0 rgba(255,255,255,0.4); transition:filter .15s; }
+  .btn:hover{ filter:brightness(1.08); }
+
+  /* Barra de progreso del vuelo (estilo Flightradar24) */
+  /* Por defecto vive arriba a la derecha, bajo la barra de herramientas */
+  #progress-panel{ width:340px; border-radius:22px; color:var(--text); overflow:hidden; }
+  #progress-panel.hidden{ display:none; }
+  #progress-panel.floating{ position:fixed; width:340px; z-index:1600; }
+  #progress-panel .panel-head{ cursor:grab; }
+  #progress-panel .panel-head:active{ cursor:grabbing; }
+  #progress-panel.collapsed .panel-head{ border-bottom:none; }
+  #progress-panel.collapsed .pg-body{ display:none; }
+  #pg-caret{ color:var(--text-dim); flex:none; transition:transform .2s; transform:rotate(180deg); }
+  #progress-panel.collapsed #pg-caret{ transform:rotate(0deg); }
+  .pg-body{ padding:14px 18px 16px; }
+  .pg-ends{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .pg-end{ display:flex; flex-direction:column; min-width:0; }
+  .pg-end.to{ align-items:flex-end; text-align:right; }
+  .pg-icao{ font-size:26px; font-weight:700; letter-spacing:-0.5px; line-height:1; }
+  .pg-city{ font-size:11px; color:var(--text-dim); font-weight:500; margin-top:4px; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pg-mid{ display:flex; align-items:center; justify-content:center; flex:none; padding-top:3px; }
+  .pg-plane-badge{ width:30px; height:30px; border-radius:50%; background:rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; color:#fbbf24; }
+  #pg-badge-icon{ transition:transform .5s ease, color .5s; }
+  .pg-track{ position:relative; height:4px; border-radius:2px; background:rgba(255,255,255,0.16); margin:16px 0 9px; }
+  .pg-fill{ position:absolute; left:0; top:0; height:100%; border-radius:2px; background:#fbbf24; width:0%; transition:width .6s; }
+  .pg-dot{ position:absolute; top:50%; width:15px; height:15px; margin:-7.5px 0 0 -7.5px; color:#fff; transition:left .6s; }
+  .pg-nums{ display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-dim); font-weight:500; }
+  .pg-nums b{ color:var(--text); font-weight:600; }
+  .pg-next{ margin-top:11px; padding-top:10px; border-top:1px solid var(--row-border); }
+  .pg-next-head{ display:flex; justify-content:space-between; align-items:baseline; font-size:12px; }
+  .pg-next-head .pg-v{ color:#7dd3fc; font-weight:700; }
+  .pg-next-track{ position:relative; height:3px; border-radius:2px; background:rgba(255,255,255,0.14); margin-top:7px; }
+  .pg-next-fill{ position:absolute; left:0; top:0; height:100%; width:0%; border-radius:2px; background:#7dd3fc; transition:width .6s; }
+
+  .pg-brg{ margin-top:9px; padding-top:9px; border-top:1px solid var(--row-border); display:flex; justify-content:space-between; font-size:12px; }
+  .pg-brg .pg-k{ color:var(--text-dim); font-weight:500; }
+  .pg-brg .pg-v{ font-weight:700; color:#fbbf24; }
+
+  #legend{ position:absolute; bottom:20px; left:20px; z-index:1000; border-radius:18px; color:var(--text); }
+  #legend h2{ font-size:11px; letter-spacing:1.2px; text-transform:uppercase; color:var(--text-dim); margin:0 0 10px; font-weight:600; }
+  .leg-item{ display:flex; align-items:center; gap:10px; margin:7px 0; font-size:13px; font-weight:500; }
+  .leg-item .sw{ width:26px; height:5px; border-radius:3px; flex:none; }
+  #legend-toggle{ display:flex; align-items:center; gap:9px; padding:11px 13px; cursor:pointer; user-select:none; -webkit-user-select:none; }
+  #legend-toggle .grad{ width:20px; height:20px; border-radius:6px; flex:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.2); background:linear-gradient(180deg,#ef4444,#fb923c,#facc15,#4ade80,#38bdf8,#2f6df6); }
+  #legend-toggle .lt-label{ font-size:13px; font-weight:600; }
+  #legend-body{ padding:2px 17px 15px; }
+  #legend.collapsed #legend-body{ display:none; }
+
+  #tools{ position:absolute; top:20px; right:20px; z-index:1000; display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
+  .tool-row{ display:flex; gap:8px; border-radius:16px; padding:7px; }
+  .tool-btn{ width:38px; height:38px; border-radius:11px; border:none; cursor:pointer; background:transparent; color:var(--text-dim);
+    display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
+  .tool-btn:hover{ color:#fff; background:rgba(255,255,255,0.10); }
+  .tool-btn.active{ background:rgba(59,130,246,0.30); color:#fff; box-shadow:inset 0 1px 0 rgba(255,255,255,0.3); }
+  .tool-btn.disabled{ opacity:.3; cursor:default; }
+  .tool-btn.disabled:hover{ background:transparent; color:var(--text-dim); }
+
+  #layers{ border-radius:18px; padding:9px; width:252px; }
+  #layers.hidden{ display:none; }
+  .layer-opt{ display:flex; align-items:center; gap:12px; padding:8px; border-radius:12px; cursor:pointer; transition:background .15s; }
+  .layer-opt:hover{ background:rgba(255,255,255,0.07); }
+  .layer-opt .thumb{ width:40px; height:32px; border-radius:8px; flex:none; background-size:cover; background-position:center; border:1px solid rgba(255,255,255,0.18); }
+  .layer-opt .name{ color:var(--text); font-size:14px; font-weight:500; flex:1; }
+  .radio{ width:18px; height:18px; border-radius:50%; border:2px solid var(--text-dim); flex:none; position:relative; }
+  .layer-opt.sel .radio{ border-color:var(--accent); }
+  .layer-opt.sel .radio::after{ content:''; position:absolute; inset:3px; border-radius:50%; background:var(--accent); }
+  .divider{ height:1px; background:var(--row-border); margin:8px 6px; }
+  .toggle-opt{ display:flex; align-items:center; gap:12px; padding:8px; }
+  .toggle-opt .tico{ width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.08); flex:none; }
+  .toggle-opt .name{ color:var(--text); font-size:14px; font-weight:500; flex:1; }
+  .sw-toggle{ width:44px; height:26px; border-radius:13px; background:rgba(120,130,145,0.5); position:relative; cursor:pointer; transition:background .2s; flex:none; }
+  .sw-toggle::after{ content:''; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.4); transition:transform .2s; }
+  .sw-toggle.on{ background:#34c759; }
+  .sw-toggle.on::after{ transform:translateX(18px); }
+  .radius-row{ display:flex; align-items:center; gap:8px; padding:4px 10px 8px 56px; }
+  .radius-row .rr-label{ color:var(--text-dim); font-size:13px; font-weight:500; flex:1; }
+  .radius-row .rr-btn{ width:26px; height:26px; border-radius:8px; border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-size:16px; font-weight:600; display:flex; align-items:center; justify-content:center; }
+  .radius-row .rr-btn:hover{ background:rgba(255,255,255,0.2); }
+  .radius-row #rad-val{ font-size:13px; font-weight:600; min-width:52px; text-align:center; color:#fff; }
+
+  /* Brújula: va justo encima de los botones de zoom (que miden 88px de alto) */
+  #compass{ position:absolute; bottom:118px; right:20px; z-index:1000; width:44px; height:44px;
+    border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  #compass:hover{ filter:brightness(1.15); }
+  #compass-rose{ transition:transform .12s linear; }
+
+  #zoom{ position:absolute; bottom:20px; right:20px; z-index:1000; display:flex; flex-direction:column; border-radius:14px; overflow:hidden; }
+  #zoom button{ width:44px; height:44px; border:none; cursor:pointer; background:transparent; color:var(--text); font-size:22px; font-weight:300; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+  #zoom button:hover{ background:rgba(255,255,255,0.10); }
+  #zoom button:first-child{ border-bottom:1px solid var(--row-border); }
+
+  #bottom-center{ position:absolute; bottom:20px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; gap:10px; }
+  .chip{ border-radius:20px; padding:8px 16px; color:var(--text); font-size:13px; font-weight:500; display:flex; align-items:center; gap:8px; cursor:default; }
+
+  .acft-inner{ line-height:0; } .acft-inner svg{ display:block; }
+  .plane-me svg{ filter:drop-shadow(0 2px 5px rgba(0,0,0,0.85)); }
+  .plane-traffic svg{ filter:drop-shadow(0 1px 3px rgba(0,0,0,0.7)); }
+  .apt-label{ transform:translate(9px,-9px); background:rgba(15,23,42,0.72); color:#fff; font-size:11px; font-weight:600; letter-spacing:.3px; padding:2px 7px; border-radius:7px; border:1px solid rgba(255,255,255,0.22); white-space:nowrap; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 2px 8px rgba(0,0,0,0.4); cursor:pointer; }
+  .vor-mk{ cursor:pointer; line-height:0; filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
+  .apt-pin{ cursor:pointer; width:40px; height:40px; display:flex; align-items:flex-end; justify-content:center; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.55)); }
+  /* Fundido de los que aparecen por zoom: sin esto entran y salen de golpe */
+  .apt-pin[data-view="1"], .vor-mk[data-view="1"]{ transition:opacity .28s ease; }
+  .wp-mk{ cursor:pointer; width:38px; height:38px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .pp-actions{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .pp-actions button{ flex:1; border:none; cursor:pointer; font-family:'Roboto',sans-serif; font-size:12px; font-weight:600; padding:8px 6px; border-radius:9px; color:#fff; transition:filter .15s; }
+  .pp-actions button:hover{ filter:brightness(1.12); }
+  .pp-btn-route{ background:#2f6df6; }
+  .pp-btn-tp{ background:rgba(255,255,255,0.16); }
+  .pp-btn-remove{ background:#ef4444; }
+  .pp-btn-gen{ background:#0ea5e9; }
+  .pp-btn-wp{ background:#a855f7; }
+  .pp-actions button:disabled{ opacity:.6; cursor:default; }
+
+  .maplibregl-popup-content{ background:var(--glass-bg); color:var(--text); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
+    border:1px solid var(--glass-brd); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+    font-family:'Roboto',sans-serif; font-size:13px; line-height:1.5; padding:11px 14px; }
+  .maplibregl-popup-tip{ display:none; }
+  .maplibregl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
+  .apt-photo{ width:100%; height:auto; border-radius:9px; display:block; margin-bottom:8px; }
+
+  /* ---- SOLO MOCKUP ---- */
+  html,body{ overflow:auto !important; }
+  .screen{ position:relative; width:100%; height:92vh; min-height:640px; overflow:hidden; background:#0b0e14; }
+  .screen .sat{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; filter:saturate(1.05) brightness(0.92); }
+  .fake-route{ position:absolute; inset:0; pointer-events:none; }
+  .mock-note{ padding:26px 24px 10px; color:#f4f6fa; font-family:'Roboto',sans-serif; }
+  .mock-note h2{ margin:0 0 6px; font-size:17px; }
+  .mock-note p{ margin:0; color:#b3bccb; font-size:13px; }
+  .galeria{ display:flex; flex-wrap:wrap; gap:22px; padding:18px 24px 60px; align-items:flex-start; background:#0b0e14; }
+  .galeria .hist-card,.galeria .fail-card,.galeria .rt-card{ position:static; }
+</style>
+</head>
+<body>
+
+<div class="screen">
+  <img class="sat" src="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=-77.6,3.1,-73.6,7.7&bboxSR=4326&size=1600,900&format=jpg&f=image" alt="">
+  <svg class="fake-route" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice">
+    <path d="M 980 240 L 940 360" stroke="#ffffff" stroke-width="4" fill="none"/>
+    <path d="M 940 360 L 890 470" stroke="#4ade80" stroke-width="4" fill="none"/>
+    <path d="M 890 470 L 850 585" stroke="#2563eb" stroke-width="4" fill="none"/>
+    <path d="M 850 585 L 790 760" stroke="#a855f7" stroke-width="3.5" stroke-dasharray="7 7" fill="none"/>
+    <circle cx="790" cy="760" r="7" fill="#a855f7" stroke="#fff" stroke-width="2"/>
+    <circle cx="850" cy="585" r="6" fill="#0ea5e9" stroke="#fff" stroke-width="2"/>
+    <text x="878" y="592" fill="#7dd3fc" font-family="Roboto" font-size="13" font-weight="700">RNG</text>
+    <text x="905" y="690" fill="#fff" font-family="Roboto" font-size="15" font-weight="700" style="paint-order:stroke" stroke="rgba(10,10,20,0.9)" stroke-width="4">104 NM | ~00:26 | 197&deg; SSO</text>
+    <g transform="translate(850,585) rotate(197)"><path d="M0 -16 C-2 -16 -3.5 -14 -3.5 -11 L-3.5 -4 L-16 4 L-16 7 L-3.5 4 L-3.5 12 L-7 15 L-7 18 L0 16 L7 18 L7 15 L3.5 12 L3.5 4 L16 7 L16 4 L3.5 -4 L3.5 -11 C3.5 -14 2 -16 0 -16Z" fill="#fbbf24" stroke="#1e293b" stroke-width="1"/></g>
+  </svg>
+
+  <div id="left-stack">
+    <div id="panel" class="glass">
+      <div class="panel-head"><span class="logo"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg></span>
+        <h1>MSFS Live Tracker</h1>
+        <span class="pill ok"><span class="dot"></span><span>Conectado</span></span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 20h18M4 16l16-4M6 12l3-1"/></svg><span class="label">Altitud</span><span class="val"><span class="v-main">18,240 ft</span><span class="sub">5,560 m</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span class="label">Sim Rate</span><span class="val"><span class="v-main orange">4x</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 12l4-2"/></svg><span class="label">Velocidad</span><span class="val"><span class="v-main">341 kt (0.62 mach)</span><span class="sub">632 km/h</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg><span class="label">Vel. vertical</span><span class="val"><span class="v-main green">+1,150 ft/min</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8l2.5 5.5L12 12l-2.5 1.5L12 8z" fill="currentColor"/></svg><span class="label">Rumbo</span><span class="val"><span class="v-main">197&deg;</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4a4 4 0 0 0 0 8M15 12a4 4 0 0 1 0 8M9 8h6"/></svg><span class="label">Distancia</span><span class="val"><span class="v-main">64.2 NM</span><span class="sub">119 km</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span class="label">Tiempo de vuelo</span><span class="val"><span class="v-main">00:19:32</span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h3a2 2 0 0 1 2 2v11a2 2 0 0 1-4 0V7M4 20V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v14M3 20h13"/></svg><span class="label">Combustible</span><span class="val"><span class="v-main">2,480 gal</span><span class="sub">9,388 L &middot; ~3h 05m</span><span class="fuel-bar" style="display:block"><span class="fuel-fill" style="width:64%"></span></span></span></div>
+      <div class="row"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 16a4 4 0 0 1 .5-8A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 0 1 0 7.5H6z"/></svg><span class="label">Clima real</span><span class="val"><span class="v-main">19&deg;C</span><span class="sub">7 kt &middot; 220&deg; &middot; SKRG</span></span></div>
+      <div class="panel-foot"><button class="btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Reiniciar ruta</button></div>
+    </div>
+  </div>
+
+  <div id="tools">
+    <div class="tool-row glass">
+    <button class="tool-btn" id="btn-layers" title="Capas"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></button>
+    <button class="tool-btn active" id="btn-center" title="Seguir al avión"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke-linecap="round"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></button>
+    <button class="tool-btn active" id="btn-3d" title="Vista 2D / 3D" style="font-weight:700;font-size:12.5px;">3D</button>
+    <button class="tool-btn disabled" id="btn-progress" title="Progreso del vuelo (necesita una ruta)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-6 3 12 3-6h5"/></svg></button>
+    <button class="tool-btn" id="btn-fail" title="Averías"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></button>
+    <button class="tool-btn" id="btn-route" title="Pegar una ruta escrita (RouteFinder, SkyVector, SimBrief)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h4l10-10a2.8 2.8 0 0 0-4-4L4 15z"/><path d="M13.5 6.5l4 4"/></svg></button>
+    <button class="tool-btn" id="btn-hist" title="Historial de vuelos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/></svg></button>
+    <button class="tool-btn" id="btn-graph" title="Gráfico de velocidad y altitud"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M6 15l4-5 3 3 5-7"/></svg></button>
+    <button class="tool-btn" id="btn-search" title="Buscar aeropuerto"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
+  </div>
+    <div id="progress-panel" class="glass">
+      <div class="panel-head" id="pg-head">
+      <span class="logo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-6 3 12 3-6h5"/></svg></span>
+      <h1>Progreso del vuelo</h1>
+      <svg id="pg-caret" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h14M5 15h14"/></svg>
+    </div>
+      <div class="pg-body">
+        <div class="pg-ends">
+          <span class="pg-end from"><span class="pg-icao">SKRG</span><span class="pg-city">Jose Maria Cordova Intl</span></span>
+          <span class="pg-mid"><span class="pg-plane-badge" style="color:#4ade80"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" style="transform:rotate(45deg)"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg></span></span>
+          <span class="pg-end to"><span class="pg-icao">SKPE</span><span class="pg-city">Matecana Intl</span></span>
+        </div>
+        <div class="pg-track"><span class="pg-fill" style="width:38%"></span><span class="pg-dot" style="left:38%"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg></span></div>
+        <div class="pg-nums"><span><b>119 km</b> &middot; 64 NM</span><span><b>193 km</b> &middot; 104 NM &middot; 00:26</span></div>
+        <div class="pg-brg"><span class="pg-k">Rumbo a seguir</span><span class="pg-v">197&deg; SSO</span></div>
+        <div class="pg-brg" style="border-top:none;padding-top:0;margin-top:5px;"><span class="pg-k">Llegada estimada</span><span class="pg-v" style="color:var(--text)">14:52 &middot; 26m</span></div>
+        <div class="pg-brg" style="border-top:none;padding-top:0;margin-top:5px;"><span class="pg-k">Inicio del descenso</span><span class="pg-v" style="color:var(--text)">Empez&aacute; en 61 km</span></div>
+        <div class="pg-brg" style="border-top:none;padding-top:0;margin-top:5px;"><span class="pg-k">Bajar a</span><span class="pg-v" style="color:#4ade80">-1,450 ft/min</span></div>
+        <div class="pg-brg" style="border-top:none;padding-top:0;margin-top:5px;"><span class="pg-k">Velocidad</span><span class="pg-v" style="color:var(--text-dim)">libre sobre 10.000 ft</span></div>
+        <div class="pg-next"><div class="pg-next-head"><span class="pg-k">Pr&oacute;ximo punto</span><span class="pg-v">RNG &middot; 43 km &middot; 23 NM &middot; 5 min</span></div>
+        <div class="pg-next-track"><span class="pg-next-fill" style="width:55%"></span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="compass" class="glass" title="Volver al norte">
+  <svg id="compass-rose" width="30" height="30" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="14" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1"/>
+    <path d="M16 5 L20 17 L16 15 L12 17 Z" fill="#ef4444"/>
+    <path d="M16 27 L12 15 L16 17 L20 15 Z" fill="#e6eaf2"/>
+    <text x="16" y="4.2" text-anchor="middle" font-family="Roboto,sans-serif" font-size="6.5" font-weight="700" fill="#fff">N</text>
+  </svg>
+</div>
+  <div id="zoom" class="glass"><button>+</button><button>&minus;</button></div>
+  <div id="bottom-center"><div class="chip glass" id="route-chip" ><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a855f7" stroke-width="2.4" stroke-linecap="round"><path d="M4 20L20 4M20 4h-6M20 4v6"/></svg><span id="route-text"></span><button id="rc-addwp" class="rc-btn">＋ punto</button><button id="rc-mcdu" class="rc-btn rc-mcdu" title="Guardar como company route para cargarla desde el MCDU">→ MCDU</button><span style="cursor:pointer;opacity:.6;padding-left:2px;">✕</span></div></div>
+</div>
+
+<div class="mock-note"><h2>Ventanas y men&uacute;s</h2><p>Los modales de la app, abiertos y con datos de ejemplo.</p></div>
+<div class="galeria">
+  <div class="fail-card glass">
+    <div class="ed-head"><span>Aver&iacute;as</span><span>&#10005;</span></div>
+    <div class="fail-when"><span class="fail-k">Cu&aacute;ndo</span>
+      <div class="fail-ctrl"><button class="fail-mode">Ya</button><button class="fail-mode on">5 min</button><button class="fail-mode">15 min</button><input id="fail-min" placeholder="min"></div>
+    </div>
+    <div id="fail-body">
+      <span class="fail-item">Motor 1</span><span class="fail-item">Motor 2</span>
+      <span class="fail-item">Sistema el&eacute;ctrico</span><span class="fail-item">Hidr&aacute;ulico</span>
+      <span class="fail-item">Tubo pitot bloqueado</span><span class="fail-item">Frenos (ambos)</span>
+    </div>
+    <div id="fail-queue">
+      <div class="fq-item"><span class="fq-name">Motor 2</span><span class="fq-time">04:12</span><button class="fq-cancel">Cancelar</button></div>
+    </div>
+  </div>
+  <div class="hist-card glass">
+    <div class="ed-head"><span>Historial de vuelos</span><span>&#10005;</span></div>
+    <div id="hist-body">
+      <div class="hist-item"><span class="hist-main"><span class="hist-route">SKRG &rarr; TJSJ</span><span class="hist-sub">26 jul &middot; 21:40 &middot; m&aacute;x 38,000 ft</span></span><span class="hist-nums">1,914 km<span>3h 02m</span></span><button class="hist-del">&#10005;</button></div>
+      <div class="hist-item"><span class="hist-main"><span class="hist-route">SKRG &rarr; SKCL</span><span class="hist-sub">25 jul &middot; 18:12 &middot; m&aacute;x 24,000 ft</span></span><span class="hist-nums">312 km<span>48m</span></span><button class="hist-del">&#10005;</button></div>
+    </div>
+  </div>
+  <div class="rt-card glass" style="width:min(94vw,420px)">
+    <div class="ed-head"><span>Rutas a SKPE</span><span>&#10005;</span></div>
+    <div id="opts-body">
+      <div class="opt-item"><span class="opt-main"><span class="opt-awy">W14</span><span class="opt-pts">RNG &rarr; ULQ</span></span><span class="opt-nums">313 km<span>+1%</span></span></div>
+      <div class="opt-item"><span class="opt-main"><span class="opt-awy">UW3</span><span class="opt-pts">MRN &rarr; PEI &rarr; CLO</span></span><span class="opt-nums">328 km<span>+6%</span></span></div>
+    </div>
+  </div>
+  <div class="rt-card glass" style="width:min(94vw,460px)">
+    <div class="ed-head"><span>Pegar una ruta</span><span>&#10005;</span></div>
+    <p class="rt-help">Copiala de RouteFinder, SkyVector o SimBrief.</p>
+    <textarea id="rt-input" readonly>SKRG DCT RNG UA321 ISVON DCT SKCL</textarea>
+    <div class="rt-msg"><span class="ok">4 puntos &middot; 311 km</span><br><span class="dim">Aerov&iacute;as sin expandir: UA321</span></div>
+    <button class="btn">Dibujar en el mapa</button>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Datos descargados automáticamente (se regeneran solos al primer arranque)
+data/airports.csv
+data/airways.dat
+data/navaids.csv
+data/runways.csv
+data/waypoints.csv
+
+# Datos personales de vuelo (no son parte del código)
+data/current_flight.json
+data/flights_history.json
+data/simbridge_path.txt
+data/simbridge_exe.txt
+data/simconnect_dll_path.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
