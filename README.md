@@ -1,124 +1,128 @@
 # MSFS Live Tracker
 
-App web local que muestra tu vuelo de Microsoft Flight Simulator 2020 en vivo sobre un
-mapa satelital real, al estilo Flightradar24. Pensada para un segundo monitor, una tablet
-o para pasarle el link a alguien en tu misma red.
+Local web app that shows your Microsoft Flight Simulator 2020 flight live on a real
+satellite map, Flightradar24-style. Built for a second monitor, a tablet, or to share
+the link with someone on your same network.
 
-## Qué hace
+## What it does
 
-**El mapa**
+**The map**
 
-- Mapa vectorial (MapLibre) con satélite real y nombres de lugares en blanco con halo.
-- 4 capas: satélite con nombres (por defecto), satélite, mapa de calles, mapa oscuro.
-- Aeropuertos y pistas reales (datos de OurAirports): cada pista se dibuja con su largo
-  y orientación reales. Clic para ver ICAO, nombre, elevación y pista.
-- VOR reales con su frecuencia.
-- Radio configurable (20 a 200 NM) alrededor del avión y del aeropuerto de destino.
-  Fuera de ese radio, si hacés zoom sobre una zona, lo que hay ahí aparece igual, con un
-  fundido suave al alejarte.
-- El mapa sigue al avión. Un toque en el mapa suelta el seguimiento; el botón de la barra
-  lo vuelve a enganchar.
-- Brújula abajo a la derecha: gira con el mapa y al tocarla vuelve al norte.
+- Vector map (MapLibre) with real satellite imagery and place names in white with a halo.
+- 4 layers: satellite with labels (default), satellite, street map, dark map.
+- Real airports and runways (data from OurAirports): each runway is drawn with its real
+  length and orientation. Click to see ICAO, name, elevation, and runway.
+- Real VORs with their frequency.
+- Configurable radius (20 to 200 NM) around the aircraft and the destination airport.
+  Outside that radius, if you zoom into an area, what's there still shows up, with a
+  smooth fade as you zoom out.
+- The map follows the aircraft. Tapping the map releases tracking; the toolbar button
+  re-engages it.
+- Compass in the bottom right: rotates with the map, tapping it resets to north.
 
-**Panel de datos**
+**Data panel**
 
-- Altitud, velocidad (con mach), velocidad vertical, rumbo, distancia, tiempo de vuelo,
-  combustible con autonomía estimada y clima real (METAR).
-- Sim Rate: muestra la velocidad de simulación y la sube o baja desde la app.
-- Estado del avión: tren, flaps, spoilers, freno de mano y luces, todo accionable.
-- Gráfico de velocidad y altitud, con marcas de los puntos de ruta que fuiste pasando.
+- Altitude, speed (with mach), vertical speed, heading, distance, flight time, fuel
+  with estimated range, and real weather (METAR).
+- Sim Rate: shows the simulation speed and lets you raise or lower it from the app.
+- Aircraft status: gear, flaps, spoilers, parking brake, and lights, all actionable.
+- Speed and altitude chart, with markers for the waypoints you've passed.
 
-**Rutas**
+**Routes**
 
-- Ruta directa a cualquier aeropuerto desde su popup.
-- Generador de rutas: encadena VOR reales entre tu posición y el destino, buscando el
-  camino más corto que además no se desvíe del rumbo directo.
-- Mantené pulsado en cualquier punto del mapa para trazar ruta hasta ahí.
-- Puntos intermedios: se insertan donde menos desvían la ruta.
-- La etiqueta de la ruta muestra distancia, tiempo y rumbo a seguir.
-- Si armaste un plan en el mapa del mundo de MSFS, la app lo detecta y adopta el destino
-  sola (solo si el archivo es reciente y estás en su aeropuerto de salida).
+- Direct route to any airport from its popup.
+- Route generator: chains real VORs between your position and the destination, looking
+  for the shortest path that doesn't stray from the direct heading.
+- Long-press anywhere on the map to draw a route there.
+- Waypoints: inserted where they deviate the route the least.
+- The route label shows distance, time, and heading to follow.
+- If you built a flight plan on the MSFS world map, the app detects it and adopts the
+  destination on its own (only if the file is recent and you're at its departure
+  airport).
 
-**Progreso del vuelo**
+**Flight progress**
 
-Panel opcional (botón en la barra de arriba a la derecha) con origen y destino, barra de
-avance, kilómetros recorridos y restantes, rumbo a seguir, llegada estimada, guía de
-descenso y distancia al próximo punto.
+Optional panel (button on the top right toolbar) with origin and destination, progress
+bar, distance covered and remaining, heading to follow, estimated arrival, descent
+guidance, and distance to the next waypoint.
 
-La llegada estimada funciona incluso con el avión parado: supone una velocidad de crucero
-típica según el tipo de motor y cambia al cálculo real apenas superás los 40 nudos.
+Estimated arrival works even with the aircraft stopped: it assumes a typical cruise
+speed based on the engine type and switches to the real calculation as soon as you pass
+40 knots.
 
-La guía de descenso usa la regla 3:1 (3 millas por cada 1000 pies a perder) y tiene en
-cuenta la elevación del aeropuerto de destino.
+Descent guidance uses the 3:1 rule (3 miles per 1000 feet to lose) and takes the
+destination airport's elevation into account.
 
-**Historial**
+**History**
 
-El vuelo se guarda solo al terminar: cuando despegaste, aterrizaste y quedaste detenido
-unos 45 segundos, pasa al historial con su trayecto, kilómetros, duración y altitud
-máxima. El rastro sigue en pantalla para que puedas mirarlo; se limpia recién cuando
-despegás de nuevo. También se guarda al tocar "Reiniciar ruta" (sin duplicarlo si ya se
-había guardado solo).
+The flight is saved automatically when it ends: once you've taken off, landed, and been
+stopped for about 45 seconds, it moves to history with its track, distance, duration,
+and max altitude. The trail stays on screen so you can look at it; it only clears when
+you take off again. It's also saved by tapping "Reset route" (without duplicating it if
+it was already auto-saved).
 
-Se consulta desde el botón de historial y se puede borrar vuelo por vuelo.
+You can check it from the history button and delete flights one by one.
 
 **Beta**
 
-- Teletransporte a cualquier aeropuerto, eligiendo pista y si querés salir o llegar.
-- Ajuste manual de altitud, rumbo, ángulo y velocidad.
+- Teleport to any airport, choosing runway and whether you want to depart or arrive.
+- Manual adjustment of altitude, heading, bank angle, and speed.
 
-## Requisitos
+## Requirements
 
 1. Python 3.9+
-2. MSFS 2020 corriendo (SimConnect viene activado por defecto).
-3. Conexión a internet para el satélite, el clima y la descarga inicial de los datos de
-   aeropuertos y VOR.
+2. MSFS 2020 running (SimConnect is enabled by default).
+3. Internet connection for satellite imagery, weather, and the initial download of
+   airport and VOR data.
 
-## Instalación y uso
+## Installation and usage
 
-Doble clic en `iniciar.bat` (instala dependencias y arranca). O a mano:
+Double-click `iniciar.bat` (installs dependencies and starts the app). Or manually:
 
 ```
 pip install -r requirements.txt
 python app.py
 ```
 
-Se abre en http://localhost:5001
+Opens at http://localhost:5001
 
-La primera vez descarga los datos de aeropuertos, pistas y VOR (OurAirports) y los guarda
-en `data/` para no volver a bajarlos.
+The first run downloads airport, runway, and VOR data (OurAirports) and saves it in
+`data/` so it doesn't need to be downloaded again.
 
-## Para verlo en otra pantalla o dispositivo
+## Viewing it on another screen or device
 
-Desde otra compu o el celular: `http://TU-IP-LOCAL:5001`. Tu IP la ves con `ipconfig`,
-buscando "Dirección IPv4".
+From another computer or your phone: `http://YOUR-LOCAL-IP:5001`. Find your IP with
+`ipconfig`, looking for "IPv4 Address".
 
-## Aerovías en vivo (opcional)
+## Live airways (optional)
 
-El generador de rutas usa por defecto un archivo de aerovías fijo (ciclo 2012). Existe
-la posibilidad de que la app las pida en vivo a MSFS mientras volás, para que reflejen
-lo que el simulador tiene cargado en ese momento (por ejemplo, si tenés un ciclo de
-Navigraph instalado, esas aerovías actualizadas).
+The route generator uses a fixed airways file by default (2012 cycle). There's an
+option for the app to request them live from MSFS while you fly, so they reflect what
+the simulator has loaded at that moment (for example, if you have a Navigraph cycle
+installed, those updated airways).
 
-Esto necesita un `SimConnect.dll` más moderno que el que trae la app por defecto, porque
-el que viene no tiene las funciones necesarias. Para activarlo:
+This needs a newer `SimConnect.dll` than the one the app ships with by default, since
+the bundled one doesn't have the required functions. To enable it:
 
-1. Instalá el **MSFS SDK** (gratis, desde el menú "Ayuda" del propio simulador o desde
-   su sitio). Por defecto queda en `C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll` — la
-   app ya busca ahí solo.
-2. Si tu SDK quedó en otra carpeta, creá el archivo `data/simconnect_dll_path.txt` con
-   una sola línea: la ruta completa a ese `SimConnect.dll`.
-3. Reiniciá la app con MSFS corriendo. Podés ver si prendió en
+1. Install the **MSFS SDK** (free, from the simulator's own "Help" menu or from its
+   website). By default it lands in
+   `C:\MSFS SDK\SimConnect SDK\lib\SimConnect.dll` — the app already looks there on
+   its own.
+2. If your SDK ended up in a different folder, create the file
+   `data/simconnect_dll_path.txt` with a single line: the full path to that
+   `SimConnect.dll`.
+3. Restart the app with MSFS running. You can check whether it kicked in at
    `http://localhost:5001/api/live_airways_status`.
 
-Si no hacés nada de esto, la app sigue funcionando exactamente igual que siempre (con el
-archivo fijo) — esto es un agregado opcional, no un requisito.
+If you don't do any of this, the app keeps working exactly as always (with the fixed
+file) — this is an optional addition, not a requirement.
 
-## Notas
+## Notes
 
-- Los aeropuertos y VOR se prenden y apagan desde el botón de capas, arriba a la derecha.
-- El vuelo en curso se autoguarda en `data/current_flight.json`; el historial queda en
+- Airports and VORs are toggled from the layers button, top right.
+- The current flight auto-saves to `data/current_flight.json`; history is kept in
   `data/flights_history.json`.
-- El rastro se limita a 6000 puntos: al pasarse, adelgaza la mitad más vieja. En un vuelo
-  de 8 horas serían más de 100.000 puntos y el navegador se arrastraría.
-- Los vuelos con menos de 5 puntos o sin distancia real (teletransportes) no se guardan
-  en el historial.
+- The trail is capped at 6000 points: once it's exceeded, the older half is thinned
+  out. An 8-hour flight would be over 100,000 points and the browser would crawl.
+- Flights with fewer than 5 points or without real distance (teleports) aren't saved
+  to history.
