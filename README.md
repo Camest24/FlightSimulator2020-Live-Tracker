@@ -68,6 +68,32 @@ You can check it from the history button and delete flights one by one.
 - Teleport to any airport, choosing runway and whether you want to depart or arrive.
 - Manual adjustment of altitude, heading, bank angle, and speed.
 
+## Project layout
+
+```
+app.py            Flask app, shared simulator state, and all HTTP routes
+server/           backend logic, split by responsibility
+  core.py           shared state (state, route, locks) — read its header before moving code
+  geo.py            distances, bearings, cross-track error
+  navdata.py        airports, runways, VORs, waypoints and airways
+  routing.py        VOR route generator and route-string parsing
+  flight_store.py   current flight and history, on disk
+  weather.py        METAR lookup
+  msfs_plan.py      reads the .PLN you built in the MSFS world map
+  simbridge.py      SimBridge / FlyByWire company routes
+  live_airways.py   optional second SimConnect link for live airways
+templates/        index.html (markup only)
+static/css/       main.css
+static/js/        the app's JavaScript, split into 8 modules — load order matters
+tools/            developer tools (demo_medellin.py: fake flight, no MSFS needed)
+docs/             SPECS, ROADMAP, CODESTYLE
+design/           old design mockups, not part of the app
+data/             downloaded nav data and saved flights (created on first run)
+```
+
+Editing anything under `static/` or `templates/` only needs a browser refresh —
+no server restart. Python changes still need one (the demo restarts itself).
+
 ## Requirements
 
 1. Python 3.9+

@@ -5,7 +5,7 @@ arreglos de terreno 3D (modelo pegado al piso, estela por altitud, cámara sin t
 sin tener que volar de verdad.
 
 Uso:
-    python demo_medellin.py
+    python tools/demo_medellin.py     (desde la raiz del proyecto)
     (o doble clic en iniciar-demo.bat)
 
 Después abrí http://localhost:5001 en el navegador y activá "Terreno 3D" en el menú
@@ -17,12 +17,23 @@ de la interfaz (combustible, luces, AP, etc.) también se ve poblado con datos d
 mentira, coherentes entre sí, en vez de quedar en blanco.
 """
 import math
+import os
+import sys
 import threading
 import time
+
+# Este archivo vive en tools/, pero importa app.py, que esta en la raiz del proyecto. Al
+# ejecutarlo directamente, Python solo pone tools/ en sys.path, asi que hay que agregar la
+# raiz a mano o el `import app` de abajo falla.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from flask import jsonify, request
 
 import app as appmod
+
+# Relanzar el proceso solo cuando cambia un .py. Ponelo en False si alguna vez molesta
+# (por ejemplo, si el reinicio te corta una prueba larga a mitad de camino).
+USAR_RELOADER = True
 
 # Centro del círculo: el valle de Medellín, cerca del centro de la ciudad.
 CENTER_LAT = 6.2442
@@ -188,8 +199,26 @@ def fake_telemetry():
 
 
 if __name__ == "__main__":
-    threading.Thread(target=fake_telemetry, daemon=True).start()
-    threading.Thread(target=appmod.load_navdata, daemon=True).start()
-    print("Demo: avion dando vueltas sobre Medellin, entre 7.500 y 12.500 ft.")
-    print("Abri http://localhost:5001 y activa Terreno 3D en el menu de capas.")
-    appmod.app.run(host="0.0.0.0", debug=False, port=5001, use_reloader=False)
+    # Esta demo existe para iterar sobre la interfaz, asi que se recarga sola:
+    #
+    #   .js / .css  -> se sirven como estaticos: F5 y listo, nunca hizo falta reiniciar.
+    #   .html       -> TEMPLATES_AUTO_RELOAD hace que Jinja2 relea la plantilla del disco.
+    #                  Sin esto (el default con debug=False) la plantilla queda cacheada en
+    #                  memoria y editar index.html no se ve NUNCA hasta reiniciar el proceso
+    #                  entero. Fue el origen de varias sesiones perdidas creyendo que un
+    #                  arreglo "no funcionaba" cuando en realidad no se estaba sirviendo.
+    #   .py         -> use_reloader relanza el proceso solo al detectar el cambio.
+    appmod.app.config["TEMPLATES_AUTO_RELOAD"] = True
+    appmod.app.jinja_env.auto_reload = True
+
+    # Con el reloader activo, Werkzeug ejecuta ESTE archivo dos veces: un proceso padre que
+    # solo vigila los archivos, y un hijo que corre el servidor de verdad. Sin esta guarda
+    # los hilos arrancarian en los dos, y tendriamos dos simulaciones pisandose el mismo
+    # `state` (el avion daria saltos). WERKZEUG_RUN_MAIN solo esta puesto en el hijo.
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not USAR_RELOADER:
+        threading.Thread(target=fake_telemetry, daemon=True).start()
+        threading.Thread(target=appmod.load_navdata, daemon=True).start()
+        print("Demo: avion dando vueltas sobre Medellin, entre 7.500 y 12.500 ft.")
+        print("Abri http://localhost:5001 y activa Terreno 3D en el menu de capas.")
+
+    appmod.app.run(host="0.0.0.0", debug=False, port=5001, use_reloader=USAR_RELOADER)

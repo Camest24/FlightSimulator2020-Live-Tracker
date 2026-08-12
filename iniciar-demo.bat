@@ -11,6 +11,6 @@ echo Verificando dependencias...
 pip install -r requirements.txt >nul 2>&1
 
 echo Arrancando la demo (avion dando vueltas sobre Medellin) en http://localhost:5001 ...
-python demo_medellin.py
+python tools\demo_medellin.py
 
 pause

@@ -31,9 +31,9 @@ except Exception:
 # Aerovías en vivo (segunda conexión SimConnect, con un DLL más moderno que el que trae
 # la librería de arriba, para poder pedir datos que ese DLL viejo no sabe dar). Es un
 # módulo aparte y totalmente opcional: si no está disponible, la app sigue igual que
-# siempre. Ver live_airways.py para el detalle completo.
+# siempre. Ver server/live_airways.py para el detalle completo.
 try:
-    import live_airways
+    from server import live_airways
     LIVE_AIRWAYS_AVAILABLE = True
 except Exception:
     LIVE_AIRWAYS_AVAILABLE = False
