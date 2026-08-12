@@ -2,6 +2,11 @@
 title MSFS Live Tracker
 cd /d "%~dp0"
 
+echo Cerrando cualquier proceso viejo que siga escuchando en el puerto 5001...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr :5001 ^| findstr LISTENING') do (
+    taskkill /PID %%p /F >nul 2>&1
+)
+
 echo Verificando dependencias...
 pip install -r requirements.txt >nul 2>&1
 
