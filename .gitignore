@@ -18,6 +18,9 @@ __pycache__/
 .venv/
 venv/
 
+# Herramientas locales (config de la maquina, no del proyecto)
+.claude/
+
 # Sistema
 .DS_Store
 Thumbs.db
