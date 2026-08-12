@@ -491,7 +491,11 @@
   .tool-btn.disabled{ opacity:.3; cursor:default; }
   .tool-btn.disabled:hover{ background:transparent; color:var(--text-dim); }
 
-  #layers{ border-radius:22px; padding:9px; width:252px; }
+  /* 300px y no 252: la fila del radio necesita ~210px (label + − + "60 NM · 111 km" + +)
+     y con 252 solo le quedaban 168 utiles despues del sangrado de 56px, asi que el boton "+"
+     se salia del panel. Se ensancha el panel en vez de achicar la fila para no perder la
+     alineacion de "Radio" con las etiquetas de los toggles de arriba (8 + 34 + 12 = 54px). */
+  #layers{ border-radius:22px; padding:9px; width:300px; }
   #layers.hidden{ display:none; }
   .layer-opt{ display:flex; align-items:center; gap:12px; padding:8px; border-radius:12px; cursor:pointer; transition:background .15s; }
   .layer-opt:hover{ background:rgba(255,255,255,0.07); }
