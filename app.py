@@ -485,6 +485,21 @@ def set_aircraft(alt=None, hdg=None, pitch=None, spd=None):
         return False
 
 
+def set_sim_time(zulu_seconds=None):
+    """Cambia la hora del reloj del sim (ZULU/UTC), en segundos desde medianoche.
+    Nota: solo la hora (beta). El clima real vía SimConnect en MSFS2020 no tiene un método
+    confiable de "set" directo (a diferencia de la hora) — hay que cambiarlo desde el propio
+    menú de clima del juego por ahora."""
+    if sim_aq is None or zulu_seconds is None:
+        return False
+    try:
+        with sim_lock:
+            sim_aq.set("ZULU_TIME", float(zulu_seconds))
+        return True
+    except Exception:
+        return False
+
+
 def telemetry_loop():
     global last_save, last_weather_fetch, sim_aq, sim_events, last_pos_t
     global prev_sim_clock, prev_wall_clock
@@ -692,6 +707,23 @@ def telemetry_loop():
                             d += 86400
                         if 0 < d < 120:         # descartamos saltos (cambiaste la hora)
                             state["elapsed_min"] += d / 60.0
+                        elif d <= -300:
+                            # El reloj del sim retrocedió de verdad más de 5 min (esto ya no
+                            # es el cruce de medianoche, corregido arriba): reiniciaste el
+                            # vuelo desde el menú de MSFS. La posición puede NO saltar lo
+                            # suficiente para que el chequeo de "salto imposible" de más
+                            # abajo lo detecte (si reiniciás cerca de donde ya estabas), y
+                            # entonces el cronómetro se quedaba con el valor viejo para
+                            # siempre. Acá lo reiniciamos por nuestra cuenta. El umbral de
+                            # 5 min (en vez de cualquier retroceso) es para no confundir
+                            # esto con un pequeño ajuste manual de la hora del sim.
+                            route.clear()
+                            state["distance_nm"] = 0.0
+                            state["max_alt"] = 0
+                            state["flight_start"] = time.time()
+                            state["elapsed_min"] = 0
+                            state["weather"] = None
+                            last_weather_fetch = 0
                     prev_sim_clock = reloj_sim
                     prev_wall_clock = None      # volvió el reloj del sim: soltamos el de la PC
                 elif pausado:
@@ -1148,6 +1180,19 @@ def api_teleport():
     wg = request.args.get("wg") == "1"
     eng0 = request.args.get("eng0") == "1"
     return jsonify({"ok": teleport_aircraft(lat, lon, alt, hdg, spd, gear, wg, eng0)})
+
+
+@app.route("/api/set_time", methods=["POST"])
+def api_set_time():
+    """Hora del sim (beta). Recibe hora/minuto en ZULU (UTC) y los pasa a segundos."""
+    try:
+        hh = int(request.args.get("h"))
+        mm = int(request.args.get("m"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False})
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return jsonify({"ok": False})
+    return jsonify({"ok": set_sim_time(hh * 3600 + mm * 60)})
 
 
 @app.route("/api/search")
