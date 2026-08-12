@@ -38,23 +38,43 @@ Extraído el `<script>` grande (2708 líneas) a 8 archivos en `static/js/`, cort
 - [x] Verificado el riesgo de hoisting: al dividir en varios `<script>`, las `function` ya no se hoistean entre archivos. Se analizaron las 241 declaraciones de nivel superior — ninguna sentencia que corra **en carga** llama a algo declarado en un archivo posterior (las 3 coincidencias son llamadas dentro de callbacks, que corren después de que cargó todo).
 - [ ] Pendiente: probar en vivo (Terreno 3D, cámara, ruta, historial) — requiere reiniciar el servidor una vez, porque cambió `index.html` (plantilla Jinja2 cacheada). De ahí en adelante, los cambios de JS se ven con solo F5.
 
-## Fase 3 — Python: extraer `server/` (más riesgo, un módulo a la vez)
+## Fase 3 — Python: extraer `server/` ✅ (con dos desvíos respecto al plan original)
 
-Seguir los cortes que ya marcan los comentarios `# ---` en `app.py`. Cada bullet es un módulo; se prueba antes de seguir con el siguiente:
+`app.py` pasó de 2210 a 1163 líneas. Ninguna línea de lógica modificada: solo movidas de lugar.
 
-- [ ] `server/simconnect_bridge.py` — conexión SimConnect, `telemetry_loop`, `teleport_aircraft`, `set_autopilot`, `set_aircraft`, `set_sim_time`.
-- [ ] `server/flight_history.py` — `load_current_flight`, `save_current_flight`, `archive_flight_to_history`, `read_history`/`write_history`.
-- [ ] `server/weather.py` — `fetch_nearest_metar`, `_update_weather`.
-- [ ] `server/navdata.py` — `load_navdata`, aeropuertos/VOR, `nearest_airport`, `_vors_near`.
-- [ ] `server/routing.py` — `generate_route`, `generate_route_auto`, `route_by_airways`, `parse_route_string`.
-- [ ] `server/msfs_plan.py` — `read_msfs_plan`, `_parse_world_position`, `_find_pln`.
-- [ ] `server/simbridge.py` — `find_simbridge_exe`, `simbridge_status`, `build_coroute_xml`.
-- [ ] `server/routes.py` — todos los `@app.route`, delgados, llamando a los módulos de arriba.
-- [ ] `app.py` queda solo con la creación de la app Flask, registro de rutas y arranque de threads — con `state`, `lock`, `route` re-exportados igual que hoy para no romper `demo_medellin.py`.
-- [ ] Después de CADA módulo extraído: arrancar la app real y confirmar que un vuelo se ve y se comporta igual — no esperar a tener todo dividido para probar.
+- [x] `server/core.py` (70) — `state`, `route`, `lock`, `sim_lock`, `MAX_ROUTE_POINTS` y rutas de archivo. Existe para que los módulos de `server/` accedan al estado sin importar `app.py` (import circular).
+- [x] `server/geo.py` (41) — `_haversine_nm`, `_flat_distance`, `_bearing`, `_cross_track_nm`.
+- [x] `server/weather.py` (38) — `fetch_nearest_metar`.
+- [x] `server/flight_store.py` (118) — vuelo actual e historial en disco.
+- [x] `server/msfs_plan.py` (135) — `read_msfs_plan`, `_parse_world_position`, `_find_pln`.
+- [x] `server/routing.py` (233) — `generate_route`, `generate_route_auto`, `parse_route_string`.
+- [x] `server/simbridge.py` (271) — `find_simbridge_exe`, `simbridge_status`, `build_coroute_xml`.
+- [x] `server/navdata.py` (366) — aeropuertos, pistas, VOR, waypoints **y aerovías**.
+
+### Desvío 1: `navdata` y `airways` van juntas, no separadas
+
+`load_navdata()` llama a `load_airways()`/`load_waypoints()`, y esas leen `NAV`. Separarlas creaba un import circular real. Un solo módulo es más simple que romper el ciclo artificialmente.
+
+### Desvío 2: el núcleo del simulador y las rutas HTTP se quedan en `app.py` — a propósito
+
+Diez variables de módulo (`sim_aq`, `sim_events`, `prev_sim_clock`, `prev_wall_clock`, `last_save`, `last_pos_t`, `last_weather_fetch`, `fue_al_aire`, `quieto_desde`, `vuelo_archivado`) se **reasignan** con `global`. Mover a otro módulo una función que hace `global sim_aq` rebindea el nombre **en ese módulo**: el resto del programa seguiría viendo `None` para siempre, sin error ni traza. Un análisis del AST identificó las 11 funciones atadas a ese estado — `telemetry_loop`, `teleport_aircraft`, `set_autopilot`, `set_aircraft`, `set_sim_time`, `trigger_event`, `api_gear`, `_gear_down`, `_engines_idle`, `_revisar_fin_de_vuelo`, `api_reset` — y todas quedan juntas.
+
+Los `@app.route` también se quedan: `app = Flask(__name__)` vive en `app.py` porque de ahí sale la resolución de `templates/` y `static/`; moverlo requeriría blueprints, que están fuera de alcance (ver `SPECS.md`).
+
+**Si algún día se quiere terminar de dividir esto**, no alcanza con mover funciones: hay que convertir esas 10 variables a atributos de un objeto o módulo compartido (`core.sim_aq = ...` en vez de `global sim_aq`). Es mecánico, pero ya no es un refactor "sin cambiar una línea".
+
+### Verificación (automatizada, contra una foto tomada antes de empezar)
+
+- [x] 23 rutas HTTP idénticas, antes y después.
+- [x] Las 75 funciones de nivel superior siguen accesibles como `app.<nombre>` (re-exportadas).
+- [x] Funciones puras (`_haversine_nm`, `_bearing`, `_cross_track_nm`, `_xml_esc`, `_parse_world_position`…) devuelven exactamente los mismos valores.
+- [x] `demo_medellin.py` importa y comparte el **mismo objeto** `state`.
+- [x] `GET /` y `GET /api/state` responden 200.
+- [x] Ningún módulo de `server/` importa `app.py` (sin ciclos) ni declara `global` sobre estado compartido.
+- [ ] **Pendiente: probar con MSFS de verdad.** La verificación de arriba corre sin SimConnect, así que no ejercita teleporte, luces, autopiloto ni el `telemetry_loop`. Si algo falla ahí, revertir solo esta fase: `git revert <sha de la Fase 3>`.
 
 ## Fase final — Confirmación
 
-- [ ] `iniciar.bat` arranca sin errores; la app se ve y funciona idéntica a antes de la reorganización.
-- [ ] `demo_medellin.py` sigue funcionando sin cambios.
-- [ ] Commit de la reorganización separado de cualquier fix funcional (ver `CODESTYLE.md`).
+- [ ] `iniciar.bat` arranca sin errores con MSFS abierto; un vuelo real se ve y se comporta igual.
+- [x] `demo_medellin.py` sigue funcionando sin cambios.
+- [x] Commits de la reorganización separados de los fixes funcionales (ver `CODESTYLE.md`).
