@@ -1,0 +1,559 @@
+/* Estilos de la interfaz de MSFS Live Tracker.
+   Extraido tal cual del bloque <style> que vivia dentro de templates/index.html.
+   Al servirse como estatico, cambiar este archivo solo requiere recargar la pagina
+   (F5): no hace falta reiniciar el servidor, como si pasaba cuando el CSS estaba
+   embebido en la plantilla Jinja2. */
+
+  :root{
+    --glass-bg: rgba(18,22,30,0.40);
+    --glass-brd: rgba(255,255,255,0.16);
+    --bar-bg: rgba(255,255,255,0.10);
+    --bar-brd: rgba(255,255,255,0.20);
+    --row-border: rgba(255,255,255,0.12);
+    --text: #f6f8fb;
+    --text-dim: rgba(246,248,251,0.55);
+    --accent: #3b82f6;
+    --green: #4ade80;
+    --orange: #fb923c;
+    --amber: #fbbf24;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    /* Tamaño de cada panel, por separado. La barra de herramientas, el zoom y la
+       brújula NO se escalan: son botones y tienen que seguir siendo cómodos de tocar. */
+    --ui-izq: 1;      /* panel de datos (altitud, velocidad, combustible…) */
+    --ui-der: 0.9;    /* progreso del vuelo */
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; height:100%; font-family:'Archivo','Roboto',system-ui,sans-serif; overflow:hidden; background:#0b0e14; }
+  /* Todo número va en mono con cifras de ancho fijo, para que no "salte" al actualizarse */
+  .num{ font-family:var(--mono); font-variant-numeric:tabular-nums; }
+
+  /* Odómetro: cada dígito es una tira 0-9 que se desliza, como el altímetro de cabina.
+     La altura de cada cifra es exactamente 1em, por eso el line-height va clavado en 1. */
+  .odo{ display:inline-flex; align-items:flex-end; }
+  /* 1ch = el ancho de un dígito; como la fuente de números es monoespaciada, calza exacto */
+  .odo .od{ display:inline-block; width:1ch; height:1em; overflow:hidden; position:relative; }
+  .odo .od-r{ display:block; transition:transform .5s cubic-bezier(.22,1,.3,1); }
+  .odo .od-r span{ display:block; height:1em; line-height:1; }
+  .odo .od-f{ display:inline-block; line-height:1; }
+  @media (prefers-reduced-motion: reduce){ .odo .od-r{ transition:none; } }
+
+  /* Los iconos responden al toque: crecen un pelo y se hunden al apretar */
+  .tool-btn svg, .btn-sq svg, .btn svg, #compass svg, .fail-item .fi-ico{ transition:transform .22s cubic-bezier(.3,1.4,.5,1); }
+  .tool-btn:hover svg, .btn-sq:hover svg{ transform:scale(1.14); }
+  .tool-btn:active svg, .btn-sq:active svg, .btn:active svg{ transform:scale(.9); }
+  .tool-btn.disabled:hover svg{ transform:none; }
+  #btn-reset:hover svg{ transform:rotate(-180deg); }          /* la flechita de reinicio gira */
+  #compass:hover svg{ transform:scale(1.08); }
+  .fail-item:hover .fi-ico{ transform:rotate(12deg) scale(1.15); }
+  /* Todo lo clicable se hunde rápido al apretar y vuelve despacio con un rebotito.
+     La asimetría (0.06s al bajar, 0.4s al subir) es lo que lo hace sentir físico. */
+  .tool-btn, .btn, .btn-sq, .rc-btn, .st-chip, .tile-steps button, .fail-item, .fail-repair,
+  .off-reset, .hist-del, .fq-cancel, .layer-opt, .opt-item, .sp-item, .rr-btn, .fail-mode, .lp-btn{
+    transition:transform .4s cubic-bezier(.2,1.5,.4,1), background .18s, color .18s, box-shadow .18s;
+    -webkit-tap-highlight-color:transparent; }
+  .tool-btn:active, .btn:active, .btn-sq:active, .rc-btn:active, .st-chip:active,
+  .tile-steps button:active, .fail-item:active, .fail-repair:active, .off-reset:active,
+  .hist-del:active, .fq-cancel:active, .layer-opt:active, .opt-item:active, .sp-item:active,
+  .rr-btn:active, .fail-mode:active, .lp-btn:active{
+    transform:scale(.93); transition-duration:.06s; }
+  .tool-btn.disabled:active, .fail-repair:disabled:active, .rc-btn:disabled:active{ transform:none; }
+  .pill .dot{ transition:background .3s; }
+  #map{ position:absolute; inset:0; z-index:1; background:#0b0e14; }
+  .maplibregl-ctrl-attrib, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left{ display:none !important; }
+
+  /* Pantalla de espera (tapa el mapa hasta tener una posición real, no el 0,0 del menú) */
+  #waiting{ position:absolute; inset:0; z-index:2000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; text-align:center; color:var(--text); background:rgba(11,14,20,0.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); transition:opacity .4s; }
+  #waiting.hidden{ opacity:0; pointer-events:none; }
+  /* Ícono en dos capas: el avión va suelto encima del cuadro y flota como en crucero.
+     El recorte del cuadro lo hace .w-icon, así el avión nunca se sale del borde. */
+  #waiting .w-icon{ position:relative; width:112px; height:112px; border-radius:26px;
+    overflow:hidden; filter:drop-shadow(0 16px 38px rgba(0,0,0,0.6)); }
+  #waiting .w-icon img{ position:absolute; inset:0; width:100%; height:100%; }
+  #waiting .w-icon-plane{ animation:volar 3.4s ease-in-out infinite; will-change:transform; }
+  /* Sube y baja 5 px mientras se ladea 2,5°: el ciclo cierra donde empieza, sin salto */
+  @keyframes volar{
+    0%   { transform:translateY(3px)  rotate(-1.2deg); }
+    25%  { transform:translateY(-2px) rotate(1.3deg); }
+    50%  { transform:translateY(-4px) rotate(0.4deg); }
+    75%  { transform:translateY(-1px) rotate(-1.6deg); }
+    100% { transform:translateY(3px)  rotate(-1.2deg); }
+  }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+  .w-spinner{ width:30px; height:30px; border-radius:50%; border:3px solid rgba(255,255,255,0.15);
+    border-top-color:var(--amber); animation:spin .9s linear infinite; }
+  /* Cuando el sim ya respondió, la ruedita se cierra en verde y se queda quieta */
+  #waiting.listo .w-spinner{ border-color:#4ade80; animation:none; }
+  @media (prefers-reduced-motion: reduce){ .w-spinner, #waiting .w-icon-plane{ animation:none; } }
+
+  /* Panel del gráfico de velocidad/altitud */
+  /* El gráfico ya no tapa el mapa: cuelga debajo del panel de datos, en la misma columna */
+  #graph-panel{ width:100%; flex:none; height:212px; border-radius:24px; padding:16px 18px 12px;
+    color:var(--text); display:flex; flex-direction:column; }
+  #graph-panel.hidden{ display:none; }
+  .gp-head{ display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:10px; }
+  #gp-close{ cursor:pointer; font-size:14px; opacity:.6; }
+  #gp-close:hover{ opacity:1; }
+  .gp-body{ flex:1; position:relative; min-height:0; cursor:grab; }
+  .gp-body.arrastrando{ cursor:grabbing; }
+
+  /* Barra para recorrer el vuelo cuando dura más de lo que entra en pantalla */
+  .gp-nav{ display:flex; align-items:center; gap:8px; margin-top:8px; height:20px; }
+  .gp-spans{ display:flex; gap:3px; }
+  .gp-span{ font:600 9.5px/1 var(--mono); color:var(--text-dim); background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.09); border-radius:6px; padding:4px 6px; cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s; }
+  .gp-span:hover{ background:rgba(255,255,255,0.12); color:var(--text); }
+  .gp-span.on{ background:rgba(56,189,248,0.18); border-color:rgba(56,189,248,0.45); color:#7dd3fc; }
+  #gp-scroll{ flex:1; -webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
+    background:rgba(255,255,255,0.12); outline:none; cursor:pointer; }
+  #gp-scroll::-webkit-slider-thumb{ -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background:#7dd3fc; cursor:pointer; border:none; }
+  #gp-scroll::-moz-range-thumb{ width:13px; height:13px; border-radius:50%; background:#7dd3fc;
+    cursor:pointer; border:none; }
+  #gp-scroll:disabled{ opacity:.3; cursor:default; }
+  #gp-rango{ font:600 9.5px/1 var(--mono); color:var(--text-dim); min-width:74px; text-align:right; }
+
+  /* Botón de editar (junto a la altitud) + modal de ajuste */
+
+
+  #fail-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #fail-modal.hidden{ display:none; }
+  .fail-card{ width:min(94vw,520px); max-height:84vh; border-radius:20px; padding:18px 20px 18px; color:var(--text); display:flex; flex-direction:column; }
+  .fail-when{ margin-bottom:14px; }
+  .fail-k{ display:block; font-size:12.5px; color:var(--text-dim); font-weight:600; margin-bottom:8px; }
+  .fail-ctrl{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .fail-mode{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-family:inherit;
+    font-size:13px; font-weight:600; padding:8px 13px; border-radius:10px; }
+  .fail-mode.on{ background:#2f6df6; }
+  #fail-min{ width:76px; height:35px; border:none; border-radius:10px; background:rgba(255,255,255,0.08);
+    color:#fff; text-align:center; font-family:inherit; font-size:13px; font-weight:600; outline:none; }
+  #fail-body{ overflow-y:auto; display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .fail-item{ display:flex; align-items:center; gap:9px; padding:10px 11px; border-radius:11px; cursor:pointer;
+    background:rgba(255,255,255,0.06); font-size:13px; font-weight:500; transition:background .15s; }
+  .fail-item:hover{ background:rgba(239,68,68,0.22); }
+  .fail-item .fi-ico{ width:16px; height:16px; flex:none; color:#fca5a5; }
+  /* Las que están rotas ahora mismo: un clic más las repara */
+  .fail-item.roto{ background:rgba(239,68,68,0.28); color:#fecaca; }
+  .fail-item.roto:hover{ background:rgba(74,222,128,0.24); color:#bbf7d0; }
+  .fail-item.roto .fi-ico{ color:#fecaca; }
+  .fail-repair{ width:100%; height:42px; margin-bottom:14px; border:none; border-radius:13px; cursor:pointer;
+    background:rgba(74,222,128,0.22); color:#bbf7d0; font-family:inherit; font-size:13.5px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; transition:background .15s; }
+  .fail-repair:hover:not(:disabled){ background:rgba(74,222,128,0.34); }
+  .fail-repair:disabled{ opacity:.4; cursor:default; }
+  #fail-queue{ margin-top:12px; }
+  .fq-item{ display:flex; align-items:center; gap:10px; padding:9px 4px; border-top:1px solid var(--row-border); font-size:12.5px; }
+  .fq-name{ flex:1; }
+  .fq-time{ font-weight:700; color:#fb923c; font-variant-numeric:tabular-nums; }
+  .fq-cancel{ border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff; border-radius:8px;
+    font-size:11.5px; font-weight:600; padding:5px 9px; }
+
+  /* Menú de rutas alternativas */
+  #opts-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #opts-modal.hidden{ display:none; }
+  #opts-body{ max-height:62vh; overflow-y:auto; }
+  .opt-item{ display:flex; align-items:center; gap:12px; padding:12px 10px; border-radius:12px; cursor:pointer;
+    border:1px solid transparent; transition:background .15s; }
+  .opt-item:hover{ background:rgba(255,255,255,0.08); border-color:var(--border-strong); }
+  .opt-main{ flex:1; min-width:0; }
+  .opt-awy{ font-size:14.5px; font-weight:700; letter-spacing:.3px; color:#7dd3fc; }
+  .opt-pts{ font-size:12px; color:var(--text-dim); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .opt-nums{ text-align:right; font-size:13.5px; font-weight:700; white-space:nowrap; }
+  .opt-nums span{ display:block; font-size:11.5px; font-weight:500; color:var(--text-dim); margin-top:3px; }
+
+  /* Historial de vuelos */
+  #hist-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #hist-modal.hidden{ display:none; }
+  .hist-card{ width:min(94vw,520px); max-height:80vh; border-radius:20px; padding:18px 20px 16px; color:var(--text); display:flex; flex-direction:column; }
+  #hist-body{ overflow-y:auto; margin-right:-6px; padding-right:6px; }
+  .hist-item{ display:flex; align-items:center; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
+  .hist-main{ flex:1; min-width:0; }
+  .hist-route{ font-size:15px; font-weight:700; letter-spacing:-0.2px; }
+  .hist-sub{ font-size:12px; color:var(--text-dim); margin-top:3px; }
+  .hist-nums{ text-align:right; font-size:13px; font-weight:600; white-space:nowrap; }
+  .hist-nums span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:3px; white-space:nowrap; }
+  .hist-del{ border:none; cursor:pointer; background:rgba(239,68,68,0.16); color:#fca5a5; width:30px; height:30px;
+    border-radius:9px; font-size:15px; flex:none; display:flex; align-items:center; justify-content:center; }
+  .hist-del:hover{ background:rgba(239,68,68,0.3); }
+  .hist-empty{ color:var(--text-dim); font-size:14px; padding:22px 4px; text-align:center; }
+
+  /* Panel de estado del avión */
+  #status-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #status-modal.hidden{ display:none; }
+  .st-card{ width:min(92vw,430px); border-radius:20px; padding:18px 20px 20px; color:var(--text); }
+  .st-row{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
+  .st-label{ color:var(--text-dim); font-size:14px; font-weight:500; }
+  .st-val{ font-size:14px; font-weight:600; text-align:right; }
+  .st-val.on{ color:#4ade80; } .st-val.off{ color:var(--text-dim); }
+  /* Corrimiento horizontal del avión cuando el mapa lo sigue: el panel de datos tapa la
+     izquierda, así que a veces conviene empujarlo hacia la derecha. */
+  .off-box{ padding:14px 15px 12px; border-radius:16px; background:rgba(255,255,255,0.06); margin-bottom:16px; }
+  .off-top{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
+  .off-k{ font-size:13px; font-weight:600; color:var(--text); }
+  .off-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12px; color:var(--text-dim); }
+  .off-box input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:3px; outline:none; cursor:pointer;
+    background:linear-gradient(90deg,rgba(255,255,255,0.14),rgba(251,191,36,0.35),rgba(255,255,255,0.14)); }
+  .off-box input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:20px; height:20px; border-radius:50%;
+    background:var(--amber); border:none; cursor:pointer; box-shadow:0 3px 10px rgba(251,191,36,0.45); transition:transform .15s; }
+  .off-box input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.15); }
+  .off-box input[type=range]::-moz-range-thumb{ width:20px; height:20px; border-radius:50%; background:var(--amber); border:none; cursor:pointer; }
+  .off-box + .off-box{ margin-top:-6px; }
+  .ui-row{ display:flex; align-items:center; gap:10px; margin-top:11px; }
+  .ui-row .ui-k{ width:60px; flex:none; font-size:11.5px; font-weight:500; color:var(--text-dim); }
+  .ui-row input[type=range]{ flex:1; }
+  .ui-row .ui-v{ width:38px; flex:none; text-align:right; font-family:var(--mono);
+    font-variant-numeric:tabular-nums; font-size:11.5px; color:var(--text); }
+  .off-scale{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-dim); margin-top:10px; }
+  .off-reset{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:var(--text);
+    font-family:inherit; font-size:11px; font-weight:600; padding:5px 11px; border-radius:9px; }
+  .off-reset:hover{ background:rgba(255,255,255,0.24); }
+
+  .st-chips{ display:flex; gap:8px; flex-wrap:wrap; width:100%; }
+  .st-chip{ flex:1; min-width:88px; text-align:center; font-size:13px; font-weight:600; padding:13px 10px;
+    border-radius:14px; background:rgba(255,255,255,0.08); color:var(--text-dim); cursor:pointer; transition:background .15s,color .15s; }
+  .st-chip:hover{ background:rgba(255,255,255,0.16); color:#fff; }
+  .st-chip.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.3); }
+  .st-chip.on:hover{ background:#fcc94a; color:#1a1204; }
+  .st-mid{ display:flex; align-items:center; gap:8px; }
+  .st-btn{ border:none; border-radius:8px; background:rgba(255,255,255,0.14); color:#fff; font-size:12px; font-weight:700; padding:6px 11px; cursor:pointer; }
+  .st-btn:hover{ background:rgba(255,255,255,0.24); }
+  .st-btn.st-green{ background:rgba(52,199,89,0.28); color:#7ee2a0; }
+  .st-btn.st-red{ background:rgba(239,68,68,0.22); color:#fca5a5; }
+
+  /* Contador de bajada de tren (teleporte de despegue) */
+  #gear-wait{ position:absolute; inset:0; z-index:2200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); }
+  #gear-wait.hidden{ display:none; }
+  #time-modal{ position:absolute; inset:0; z-index:2200; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.55); }
+  #time-modal.hidden{ display:none; }
+  .tm-row{ display:flex; gap:14px; justify-content:center; margin:14px 0 4px; }
+  .tm-actions{ display:flex; gap:8px; justify-content:center; margin-top:14px; }
+  .gw-card{ border-radius:20px; padding:26px 34px; text-align:center; color:var(--text); display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .gw-title{ font-size:15px; font-weight:600; margin-top:8px; }
+  .gw-pct{ font-size:42px; font-weight:800; color:#38bdf8; line-height:1.1; }
+  .gw-sub{ font-size:12px; color:var(--text-dim); }
+
+  /* Menú que aparece al mantener pulsado un punto del mapa */
+  /* width:max-content => el marcador no se estira al ancho del contenedor del mapa */
+  .lp-menu{ display:flex; align-items:center; gap:6px; padding:6px; border-radius:14px;
+    width:max-content; max-width:none; flex:none; }
+  .lp-btn{ border:none; cursor:pointer; font-family:'Roboto',sans-serif; font-size:12.5px; font-weight:600;
+    padding:8px 12px; border-radius:9px; color:#fff; background:#2f6df6; white-space:nowrap; transition:filter .15s; }
+  .lp-btn:hover{ filter:brightness(1.14); }
+  .lp-btn.lp-wp{ background:#a855f7; }
+  .lp-btn.lp-tp{ background:#f59e0b; }
+  .lp-btn.lp-tp-go{ background:#f59e0b; }
+  .lp-btn.lp-x{ background:rgba(255,255,255,0.16); padding:8px 10px; }
+  .lp-form{ display:flex; align-items:center; gap:6px; }
+  .lp-lbl{ display:flex; flex-direction:column; gap:2px; font-family:'Roboto',sans-serif;
+    font-size:10px; font-weight:600; color:var(--text-dim); white-space:nowrap; }
+  .lp-input{ width:64px; border:1px solid rgba(255,255,255,0.16); background:rgba(255,255,255,0.08);
+    color:var(--text); border-radius:7px; padding:5px 6px; font-family:inherit; font-size:12.5px;
+    font-weight:600; }
+  .lp-input:focus{ outline:none; border-color:#f59e0b; }
+
+  /* Botón "+ punto" del chip de ruta */
+  .rc-btn{ border:none; border-radius:18px; height:36px; padding:0 15px; background:rgba(168,85,247,0.55); color:#fff;
+    font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer; transition:filter .15s; }
+  .rc-btn:hover{ filter:brightness(1.15); }
+  .rc-btn.on{ background:#a855f7; }
+  .rc-btn.rc-mcdu{ background:rgba(14,165,233,0.5); }
+  .rc-btn.rc-x{ width:36px; padding:0; background:rgba(255,255,255,0.12); color:var(--text-dim); font-size:12px; }
+  .rc-btn:disabled{ opacity:.55; cursor:default; }
+
+  /* Aviso de hora de llegada (aparece 10s al crear/cambiar la ruta) */
+  #eta-toast{ position:absolute; top:78px; left:50%; transform:translateX(-50%); z-index:1700; padding:12px 20px; border-radius:14px; font-size:14.5px; font-weight:700; color:var(--text); white-space:nowrap; }
+  #eta-toast.hidden{ display:none; }
+
+  /* Buscador de aeropuertos */
+  #search-panel{ position:absolute; top:20px; left:50%; transform:translateX(-50%); z-index:1600; width:min(92vw,440px); }
+  #search-panel.hidden{ display:none; }
+  .sp-box{ border-radius:16px; padding:6px; }
+  .sp-top{ display:flex; align-items:center; gap:9px; padding:8px 10px; color:var(--text-dim); }
+  #sp-input{ flex:1; background:transparent; border:none; color:var(--text); font-size:15px; font-family:'Roboto',sans-serif; outline:none; }
+  #sp-close{ cursor:pointer; }
+  #sp-results{ max-height:52vh; overflow-y:auto; }
+  .sp-item{ display:flex; align-items:center; gap:12px; padding:9px 11px; border-radius:10px; cursor:pointer; }
+  .sp-item:hover{ background:rgba(255,255,255,0.08); }
+  .sp-item .sp-icao{ font-weight:700; font-size:14px; min-width:54px; color:var(--text); }
+  .sp-item .sp-name{ color:var(--text-dim); font-size:13px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Dos variantes de vidrio: paneles de datos (oscuro, legible) y barras flotantes (claro) */
+  .glass{ background:var(--glass-bg); border:1px solid var(--glass-brd);
+    backdrop-filter:blur(34px) saturate(190%); -webkit-backdrop-filter:blur(34px) saturate(190%);
+    box-shadow:0 22px 55px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.28); position:relative; }
+  .glass::before{ content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 42%); }
+  .glass.bar{ background:var(--bar-bg); border-color:var(--bar-brd);
+    box-shadow:0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.35); }
+
+  /* La columna entera hace scroll si no entra; así el panel de datos NUNCA se comprime
+     cuando se abre el gráfico (antes le cortaba las últimas filas). */
+  /* El escalado no cambia la caja que el elemento ocupa, solo cómo se ve. Por eso el
+     max-height se divide por la escala: si no, al achicar la UI el scroll aparecía antes
+     de tiempo aunque sobrara pantalla. */
+  #left-stack{ position:absolute; top:26px; left:26px; z-index:1000; width:346px; display:flex; flex-direction:column;
+    gap:12px; max-height:calc((100% - 52px) / var(--ui-izq)); overflow-y:auto; scrollbar-width:none; padding-right:2px;
+    transform:scale(var(--ui-izq)); transform-origin:top left; }
+  #left-stack::-webkit-scrollbar{ display:none; }
+
+  /* Barra de título: ahora vive fuera de la tarjeta de datos */
+
+  #panel{ width:100%; flex:none; border-radius:24px; color:var(--text); padding:20px 20px 18px; }
+
+
+  /* Dato principal: altitud y velocidad, uno al lado del otro */
+  .hero{ display:flex; gap:20px; }
+  .hero-cell{ flex:1; min-width:0; }
+  .hero-k{ display:block; font-size:11px; font-weight:500; color:var(--text-dim); }
+  /* flex-end en vez de baseline: los rodillos del odómetro recortan por abajo y su
+     "baseline" no es la de una cifra normal, así la unidad no queda flotando */
+  .hero-v{ display:flex; align-items:flex-end; gap:5px; margin-top:8px; }
+  .hero-v .u{ padding-bottom:0.1em; }
+  .hero-v .n{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:30px; font-weight:500; line-height:1; letter-spacing:-1px; }
+  .hero-v .u{ font-size:12px; color:var(--text-dim); }
+  .hero-sub{ display:block; font-size:11px; font-weight:400; color:var(--text-dim); margin-top:8px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hero-sub.green{ color:var(--green); } .hero-sub.orange{ color:var(--orange); }
+
+  /* Fila de fichas: rumbo, distancia, sim rate */
+  .tiles{ display:flex; gap:8px; margin-top:18px; }
+  .tile{ flex:1; min-width:0; padding:11px 12px; border-radius:14px; background:rgba(255,255,255,0.08); position:relative; }
+  .tile-k{ display:block; font-size:10.5px; font-weight:500; color:var(--text-dim); }
+  .tile-v{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:16px; font-weight:500; margin-top:7px; }
+  .tile-v{ display:flex; align-items:flex-end; }
+  .tile-v .uu{ font-family:'Archivo',sans-serif; font-size:10.5px; color:var(--text-dim); margin-left:3px; padding-bottom:0.15em; }
+  .tile-v.orange{ color:var(--orange); }
+  .tile-sub{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:10.5px; color:var(--text-dim); margin-top:4px; }
+  /* Los − + del sim rate viven dentro de la ficha, sin robarle sitio al número */
+  .tile-steps{ position:absolute; right:6px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:4px; }
+  .tile-steps button{ width:28px; height:24px; border:none; border-radius:8px; cursor:pointer;
+    background:rgba(255,255,255,0.14); color:var(--text); font-family:inherit; font-size:15px; font-weight:600;
+    line-height:1; display:flex; align-items:center; justify-content:center; padding:0; }
+  .tile-steps button:hover{ background:rgba(255,255,255,0.30); }
+
+  /* Filas de abajo: tiempo, combustible, clima */
+  .krow{ margin-top:15px; padding-top:15px; border-top:1px solid var(--row-border); }
+  .krow-line{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .krow-k{ font-size:12px; font-weight:500; color:var(--text-dim); }
+  .krow-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }
+  .krow-sub{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-top:9px; }
+  .wx-v{ display:flex; align-items:baseline; gap:9px; }
+  .wx-v .wx-sub{ font-size:11.5px; color:var(--text-dim); font-family:'Archivo',sans-serif; }
+  .fuel-bar{ height:8px; border-radius:4px; background:rgba(255,255,255,0.14); overflow:hidden; margin-top:11px; display:none; }
+  .fuel-fill{ display:block; height:100%; width:0%; border-radius:4px; background:#4ade80; box-shadow:0 0 14px rgba(74,222,128,0.5); transition:width .5s, background .5s; }
+
+  .panel-foot{ display:flex; gap:8px; margin-top:18px; }
+  .btn{ flex:1; height:46px; border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff;
+    font-family:inherit; font-size:13.5px; font-weight:600; border-radius:15px;
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.28); transition:background .15s; }
+  .btn:hover{ background:rgba(255,255,255,0.22); }
+  /* Botón cuadrado de luces, al lado de "Reiniciar ruta" */
+  .btn-sq{ width:46px; height:46px; flex:none; border:none; cursor:pointer; border-radius:15px;
+    background:rgba(255,255,255,0.10); color:var(--text-dim);
+    display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
+  .btn-sq:hover{ background:rgba(255,255,255,0.20); color:#fff; }
+  .btn-sq.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
+
+  /* Barra de progreso del vuelo (estilo Flightradar24) */
+  /* Por defecto vive arriba a la derecha, bajo la barra de herramientas */
+  #progress-panel{ width:348px; border-radius:24px; color:var(--text); padding:18px 20px 20px;
+    transform:scale(var(--ui-der)); transform-origin:top right; }
+  #progress-panel.hidden{ display:none; }
+  /* Suelto y arrastrable, escala desde la esquina que sigue al cursor */
+  #progress-panel.floating{ position:fixed; width:348px; z-index:1600; transform-origin:top left; }
+  /* Colapsado, el panel debía seguir midiendo 348px de ancho aunque el cuerpo esté oculto:
+     en pantallas chicas eso tapaba media pantalla y era imposible mover el mapa con el dedo
+     sin apagar el panel entero. Colapsado, que ocupe solo lo que el título necesita. */
+  #progress-panel.collapsed{ width:auto; max-width:220px; padding-right:16px; }
+  #progress-panel .panel-head{ display:flex; align-items:center; gap:10px; margin-bottom:16px;
+    cursor:grab; user-select:none; -webkit-user-select:none; }
+  #progress-panel .panel-head:active{ cursor:grabbing; }
+  #progress-panel .panel-head h1{ flex:1; font-size:12px; font-weight:600; margin:0; color:var(--text-dim); }
+  #progress-panel .panel-head .logo{ display:none; }
+  #pg-caret{ color:rgba(246,248,251,0.45); flex:none; transition:transform .2s; }
+  #progress-panel.collapsed .panel-head{ margin-bottom:0; }
+  #progress-panel.collapsed #pg-caret{ transform:rotate(90deg); }
+  #progress-panel.collapsed .pg-body{ display:none; }
+  .pg-ends{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .pg-end{ display:flex; flex-direction:column; min-width:0; }
+  .pg-end.to{ align-items:flex-end; text-align:right; }
+  .pg-icao{ font-size:28px; font-weight:600; letter-spacing:-0.8px; line-height:1; }
+  .pg-city{ font-size:11px; line-height:1.3; color:var(--text-dim); font-weight:400; margin-top:6px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pg-mid{ display:flex; align-items:center; justify-content:center; flex:none; padding-top:2px; }
+  .pg-plane-badge{ width:34px; height:34px; border-radius:50%; background:rgba(251,191,36,0.9);
+    display:flex; align-items:center; justify-content:center; color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
+  #pg-badge-icon{ transition:transform .5s ease; }
+  .pg-track{ position:relative; height:8px; border-radius:4px; background:rgba(255,255,255,0.14); margin:20px 0 11px; overflow:hidden; }
+  .pg-fill{ position:absolute; left:0; top:0; height:100%; border-radius:4px; width:0%;
+    background:linear-gradient(90deg, rgba(251,191,36,0.5), #fbbf24); transition:width .6s; }
+  .pg-nums{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); font-weight:400; }
+  .pg-nums b{ color:var(--text); font-weight:600; }
+  .pg-rows{ display:flex; flex-direction:column; gap:11px; margin-top:18px; padding-top:16px; border-top:1px solid var(--row-border); }
+  .pg-brg{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; }
+  .pg-brg .pg-k{ color:var(--text-dim); font-weight:500; }
+  .pg-brg .pg-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13px; font-weight:500; color:var(--text); }
+  .pg-brg .pg-v.amber{ font-family:'Archivo',sans-serif; font-size:13px; font-weight:600; color:var(--amber); }
+  .pg-vwrap{ display:flex; align-items:baseline; gap:7px; }
+  .pg-tabla-btn{ display:flex; align-items:center; justify-content:center; width:20px; height:20px;
+    border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06);
+    color:var(--text-dim); font-size:12px; line-height:1; cursor:pointer; padding:0; flex:none; }
+  .pg-tabla-btn:hover{ background:rgba(255,255,255,0.12); color:var(--text); }
+  .pg-tabla-btn:active{ transform:scale(0.92); }
+  /* Estas dos filas muestran un dato de la tabla de descenso, y manteniéndolas pulsadas
+     se abre la tabla entera. El puntero y el puntito avisan que se puede. */
+  .pg-pulsable{ cursor:pointer; position:relative; -webkit-user-select:none; user-select:none;
+    -webkit-touch-callout:none; border-radius:8px; transition:background .15s; }
+  .pg-pulsable:hover{ background:rgba(255,255,255,0.05); }
+  .pg-pulsable::after{ content:''; position:absolute; right:-1px; top:50%; width:3px; height:3px;
+    margin-top:-1.5px; border-radius:50%; background:rgba(125,211,252,0.55); }
+
+  /* Tabla de descenso: a qué altura y velocidad hay que ir en cada milla que falta.
+     Vive en un modal que se abre manteniendo pulsada la fila de altura o de velocidad. */
+  #tabla-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center;
+    justify-content:center; background:rgba(0,0,0,0.5); }
+  #tabla-modal.hidden{ display:none; }
+  #tabla-card{ width:min(92vw,380px); }
+  #tabla-close{ cursor:pointer; opacity:.6; }
+  #tabla-close:hover{ opacity:1; }
+  .tabla-avion{ margin-top:8px; font-size:11px; font-weight:500; color:rgba(246,248,251,0.45); }
+
+  .pg-tabla-perfiles{ display:flex; gap:4px; margin-top:12px; }
+  .pg-perfil{ font:600 9.5px/1 var(--mono); color:var(--text-dim); background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.09); border-radius:6px; padding:4px 7px; cursor:pointer;
+    transition:background .15s, color .15s, border-color .15s; }
+  .pg-perfil:hover{ background:rgba(255,255,255,0.12); color:var(--text); }
+  .pg-perfil.on{ background:rgba(125,211,252,0.18); border-color:rgba(125,211,252,0.45); color:#7dd3fc; }
+
+  .pg-tabla-cols{ display:grid; grid-template-columns:44px 1fr 1fr; gap:6px; margin-top:10px;
+    padding:0 6px 5px; border-bottom:1px solid var(--row-border);
+    font:600 9px/1 var(--mono); letter-spacing:.5px; text-transform:uppercase; color:rgba(246,248,251,0.35); }
+  .pg-tabla-body{ max-height:min(52vh,420px); overflow-y:auto; scrollbar-width:none; }
+  .pg-tabla-body::-webkit-scrollbar{ display:none; }
+  .pg-fila{ display:grid; grid-template-columns:44px 1fr 1fr; gap:6px; align-items:center;
+    padding:8px 6px; border-radius:8px; font-family:var(--mono); font-variant-numeric:tabular-nums;
+    font-size:12.5px; color:rgba(246,248,251,0.55); }
+  .pg-fila .fnm{ font-weight:600; color:rgba(246,248,251,0.42); }
+  /* Milla donde cambia lo que hay que hacer (frenar, sacar flaps): son las de decisión,
+     y con 120 filas iguales sería imposible encontrarlas de un vistazo. */
+  .pg-fila.hito{ color:rgba(246,248,251,0.8); box-shadow:inset 2px 0 0 rgba(125,211,252,0.5); }
+  .pg-fila.hito .fnm{ color:rgba(125,211,252,0.85); }
+  /* La fila donde estás ahora: es la que se mira de reojo mientras volás */
+  .pg-fila.activa{ background:rgba(125,211,252,0.14); color:#e0f2fe; }
+  .pg-fila.activa .fnm{ color:#7dd3fc; }
+  .pg-fila.pasada{ opacity:.32; }
+  .pg-fila .fflap{ color:#fbbf24; }
+  .pg-tabla-pie{ margin-top:8px; font-size:10.5px; line-height:1.45; color:var(--text-dim); }
+  .pg-tabla-pie b{ font-family:var(--mono); font-weight:600; }
+  .pg-tabla-pie .alto{ color:#fb923c; }
+  .pg-tabla-pie .senda{ color:#4ade80; }
+
+  .pg-next{ margin-top:16px; padding:13px 14px; border-radius:16px;
+    background:rgba(125,211,252,0.12); border:1px solid rgba(125,211,252,0.20); }
+  .pg-next-head{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+  .pg-next-k{ font-size:10.5px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:rgba(186,230,253,0.65); }
+  .pg-next-name{ font-size:15px; font-weight:600; letter-spacing:-.2px; color:#e0f2fe; }
+  /* Sin puntos intermedios: la ficha sigue visible, apagada */
+  .pg-next.vacio{ background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.10); }
+  .pg-next.vacio .pg-next-name{ font-size:12px; font-weight:500; color:rgba(246,248,251,0.5); }
+  .pg-next.vacio .pg-nx b, .pg-next.vacio .pg-nx i{ color:rgba(246,248,251,0.4); }
+  .pg-next-track{ position:relative; height:4px; border-radius:2px; background:rgba(255,255,255,0.16); margin-top:11px; }
+  /* Tres fichas: distancia (con sus dos unidades juntas), tiempo y rumbo */
+  .pg-next-nums{ display:flex; gap:8px; margin-top:11px; }
+  .pg-nx{ flex:1; min-width:0; text-align:center; padding:8px 4px 7px; border-radius:10px; background:rgba(255,255,255,0.07); }
+  .pg-nx b{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums;
+    font-size:15px; font-weight:500; color:#e0f2fe; white-space:nowrap; }
+  .pg-nx b em{ font-style:normal; font-family:'Archivo',sans-serif; font-size:9.5px;
+    font-weight:500; color:rgba(186,230,253,0.6); margin-left:3px; }
+  .pg-nx i{ display:block; font-style:normal; font-size:10px; font-weight:500;
+    color:rgba(186,230,253,0.6); margin-top:4px; white-space:nowrap; }
+  .pg-next-fill{ position:absolute; left:0; top:0; height:100%; width:0%; border-radius:2px; background:#7dd3fc; transition:width .6s; }
+
+
+  #legend{ position:absolute; bottom:20px; left:20px; z-index:1000; border-radius:18px; color:var(--text); }
+  #legend h2{ font-size:11px; letter-spacing:1.2px; text-transform:uppercase; color:var(--text-dim); margin:0 0 10px; font-weight:600; }
+  .leg-item{ display:flex; align-items:center; gap:10px; margin:7px 0; font-size:13px; font-weight:500; }
+  .leg-item .sw{ width:26px; height:5px; border-radius:3px; flex:none; }
+  #legend-toggle{ display:flex; align-items:center; gap:9px; padding:11px 13px; cursor:pointer; user-select:none; -webkit-user-select:none; }
+  #legend-toggle .grad{ width:20px; height:20px; border-radius:6px; flex:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.2); background:linear-gradient(180deg,#ef4444,#fb923c,#facc15,#4ade80,#38bdf8,#2f6df6); }
+  #legend-toggle .lt-label{ font-size:13px; font-weight:600; }
+  #legend-body{ padding:2px 17px 15px; }
+  #legend.collapsed #legend-body{ display:none; }
+
+  #tools{ position:absolute; top:26px; right:26px; z-index:1000; display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
+  .tool-row{ display:flex; gap:6px; border-radius:22px; padding:7px; }
+  .tool-btn{ width:46px; height:46px; border-radius:16px; border:none; cursor:pointer; background:transparent;
+    color:rgba(246,248,251,0.75); font-family:inherit;
+    display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
+  .tool-btn:hover{ color:#fff; background:rgba(255,255,255,0.16); }
+  .tool-btn.active{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.4); }
+  .tool-btn.active:hover{ background:#fcc94a; color:#1a1204; }
+  .tool-btn.disabled{ opacity:.3; cursor:default; }
+  .tool-btn.disabled:hover{ background:transparent; color:var(--text-dim); }
+
+  #layers{ border-radius:22px; padding:9px; width:252px; }
+  #layers.hidden{ display:none; }
+  .layer-opt{ display:flex; align-items:center; gap:12px; padding:8px; border-radius:12px; cursor:pointer; transition:background .15s; }
+  .layer-opt:hover{ background:rgba(255,255,255,0.07); }
+  .layer-opt .thumb{ width:40px; height:32px; border-radius:8px; flex:none; background-size:cover; background-position:center; border:1px solid rgba(255,255,255,0.18); }
+  .layer-opt .name{ color:var(--text); font-size:14px; font-weight:500; flex:1; }
+  .radio{ width:18px; height:18px; border-radius:50%; border:2px solid var(--text-dim); flex:none; position:relative; }
+  .layer-opt.sel .radio{ border-color:var(--accent); }
+  .layer-opt.sel .radio::after{ content:''; position:absolute; inset:3px; border-radius:50%; background:var(--accent); }
+  .divider{ height:1px; background:var(--row-border); margin:8px 6px; }
+  .toggle-opt{ display:flex; align-items:center; gap:12px; padding:8px; }
+  .toggle-opt .tico{ width:34px; height:34px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.08); flex:none; }
+  .toggle-opt .name{ color:var(--text); font-size:14px; font-weight:500; flex:1; }
+  .sw-toggle{ width:44px; height:26px; border-radius:13px; background:rgba(120,130,145,0.5); position:relative; cursor:pointer; transition:background .2s; flex:none; }
+  .sw-toggle::after{ content:''; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.4); transition:transform .2s; }
+  .sw-toggle.on{ background:#34c759; }
+  .sw-toggle.on::after{ transform:translateX(18px); }
+  .radius-row{ display:flex; align-items:center; gap:8px; padding:4px 10px 8px 56px; }
+  .radius-row .rr-label{ color:var(--text-dim); font-size:13px; font-weight:500; flex:1; }
+  .radius-row .rr-btn{ width:26px; height:26px; border-radius:8px; border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-size:16px; font-weight:600; display:flex; align-items:center; justify-content:center; }
+  .radius-row .rr-btn:hover{ background:rgba(255,255,255,0.2); }
+  .radius-row #rad-val{ font-size:12px; font-weight:600; min-width:96px; text-align:center; color:#fff; white-space:nowrap; }
+
+  /* Brújula: va justo encima de los botones de zoom (que miden 102px de alto con su hueco) */
+  #compass{ position:absolute; bottom:132px; right:26px; z-index:1000; width:54px; height:54px;
+    border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  #compass:hover{ filter:brightness(1.15); }
+  #compass-rose{ transition:transform .12s linear; }
+
+  #zoom{ position:absolute; bottom:26px; right:26px; z-index:1000; display:flex; flex-direction:column; gap:6px; }
+  #zoom button{ width:54px; height:48px; border:1px solid var(--bar-brd); border-radius:18px; cursor:pointer;
+    background:var(--bar-bg); backdrop-filter:blur(34px) saturate(190%); -webkit-backdrop-filter:blur(34px) saturate(190%);
+    box-shadow:0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.35);
+    color:#fff; font-family:inherit; font-size:22px; font-weight:300; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+  #zoom button:hover{ background:rgba(255,255,255,0.20); }
+
+  #bottom-center{ position:absolute; bottom:26px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; gap:10px; }
+  .chip{ border-radius:28px; padding:10px 12px 10px 18px; color:var(--text); font-size:13px; font-weight:500; display:flex; align-items:center; gap:12px; cursor:default; }
+  .chip .cv{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }
+  .chip .csep{ width:1px; height:15px; background:rgba(255,255,255,0.25); }
+
+  .acft-inner{ line-height:0; } .acft-inner svg{ display:block; }
+  .plane-me svg{ filter:drop-shadow(0 2px 5px rgba(0,0,0,0.85)); }
+  .plane-traffic svg{ filter:drop-shadow(0 1px 3px rgba(0,0,0,0.7)); }
+  .apt-label{ transform:translate(9px,-9px); background:rgba(15,23,42,0.72); color:#fff; font-size:11px; font-weight:600; letter-spacing:.3px; padding:2px 7px; border-radius:7px; border:1px solid rgba(255,255,255,0.22); white-space:nowrap; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 2px 8px rgba(0,0,0,0.4); cursor:pointer; }
+  .vor-mk{ cursor:pointer; line-height:0; filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
+  .apt-pin{ cursor:pointer; width:40px; height:40px; display:flex; align-items:flex-end; justify-content:center; filter:drop-shadow(0 3px 4px rgba(0,0,0,0.55)); }
+  /* Fundido de los que aparecen por zoom: sin esto entran y salen de golpe */
+  .apt-pin[data-view="1"], .vor-mk[data-view="1"]{ transition:opacity .28s ease; }
+  .wp-mk{ cursor:pointer; width:38px; height:38px; display:flex; align-items:center; justify-content:center; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .pp-actions{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .pp-actions button{ flex:1; border:none; cursor:pointer; font-family:'Roboto',sans-serif; font-size:12px; font-weight:600; padding:8px 6px; border-radius:9px; color:#fff; transition:filter .15s; }
+  .pp-actions button:hover{ filter:brightness(1.12); }
+  .pp-btn-route{ background:#2f6df6; }
+  .pp-btn-tp{ background:rgba(255,255,255,0.16); }
+  .pp-btn-remove{ background:#ef4444; }
+  .pp-btn-gen{ background:#0ea5e9; }
+  .pp-btn-wp{ background:#a855f7; }
+  .pp-actions button:disabled{ opacity:.6; cursor:default; }
+
+  .maplibregl-popup-content{ background:var(--glass-bg); color:var(--text); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
+    border:1px solid var(--glass-brd); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
+    font-family:'Roboto',sans-serif; font-size:13px; line-height:1.5; padding:11px 14px; }
+  .maplibregl-popup-tip{ display:none; }
+  .maplibregl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
+  .apt-photo{ width:100%; height:auto; border-radius:9px; display:block; margin-bottom:8px; }
