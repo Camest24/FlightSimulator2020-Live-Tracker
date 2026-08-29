@@ -64,6 +64,10 @@
   /* Pantalla de espera (tapa el mapa hasta tener una posición real, no el 0,0 del menú) */
   #waiting{ position:absolute; inset:0; z-index:2000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; text-align:center; color:var(--text); background:rgba(11,14,20,0.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); transition:opacity .4s; }
   #waiting.hidden{ opacity:0; pointer-events:none; }
+
+  /* Server arrancado con --debug: avión de mentira, ver app.py (_debug_telemetry_loop). */
+  #debug-badge{ position:fixed; top:12px; left:12px; z-index:3000; background:#f59e0b; color:#1e293b; font:700 12px/1 system-ui,sans-serif; letter-spacing:.06em; padding:6px 12px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.4); }
+  #debug-badge.hidden{ display:none; }
   /* Ícono en dos capas: el avión va suelto encima del cuadro y flota como en crucero.
      El recorte del cuadro lo hace .w-icon, así el avión nunca se sale del borde. */
   #waiting .w-icon{ position:relative; width:112px; height:112px; border-radius:26px;
@@ -242,6 +246,7 @@
   .lp-btn.lp-wp{ background:#a855f7; }
   .lp-btn.lp-tp{ background:#f59e0b; }
   .lp-btn.lp-tp-go{ background:#f59e0b; }
+  .lp-btn.lp-cam{ background:#22d3ee; }
   .lp-btn.lp-x{ background:rgba(255,255,255,0.16); padding:8px 10px; }
   .lp-form{ display:flex; align-items:center; gap:6px; }
   .lp-lbl{ display:flex; flex-direction:column; gap:2px; font-family:'Roboto',sans-serif;
@@ -561,3 +566,16 @@
   .maplibregl-popup-tip{ display:none; }
   .maplibregl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
   .apt-photo{ width:100%; height:auto; border-radius:9px; display:block; margin-bottom:8px; }
+
+  /* ---- Modo "Terreno 3D": el pedido fue que el shader low-poly del avión/terreno también
+     se sienta en los MENÚS de encima, no solo en la escena de Cesium — así todo combina.
+     Se activa/desactiva agregando/quitando esta clase en <body> desde cesium-3d.js
+     (setActive). Dos capas: un filter con colores planos y saturados sobre TODO (incluida
+     la escena 3D — no hace daño repetir el efecto ahí, refuerza el look), más un overlay
+     fijo de scanlines finitas (pantalla vieja) que no bloquea clicks (pointer-events:none). */
+  body.retro3d-on{ filter:contrast(1.28) saturate(1.55) brightness(1.04); }
+  body.retro3d-on::after{
+    content:''; position:fixed; inset:0; z-index:9999; pointer-events:none;
+    background:repeating-linear-gradient(to bottom, rgba(0,0,0,0.09) 0px, rgba(0,0,0,0.09) 1px, transparent 1px, transparent 3px);
+    mix-blend-mode:multiply; opacity:.35;
+  }

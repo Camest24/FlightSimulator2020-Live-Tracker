@@ -288,34 +288,63 @@ function showWaiting(show, connected){
   // simulador ya respondió y solo falta que entres a un vuelo.
   if(show) w.classList.toggle('listo', !!connected);
 }
+// La ruta volada (hasta 6000 puntos) viaja aparte del estado liviano — de a ~1 vez por
+// segundo, sea por WS (mensaje {type:'route'}) o por HTTP (/api/route) — es la única parte
+// que de verdad la necesita. `lastRoute` guarda la última copia conocida para que el resto
+// del código (findOriginAirport/updateProgress en flight-progress.js, que leen
+// lastState.route) siga funcionando igual, con un desfasaje de a lo sumo ~1s, imperceptible.
+let lastRoute=[];
+
+// Procesa un estado nuevo, venga de donde venga (WS push o fetch de respaldo). Separado de
+// poll() para que ambos caminos compartan exactamente la misma lógica de dibujado.
+function handleState(s){
+  lastState=s;
+  lastState.route=lastRoute;
+  const dbg=document.getElementById('debug-badge'); if(dbg) dbg.classList.toggle('hidden', !s.debug);
+  // "null island" (lat 0, lon 0) = estás en el menú del sim, no en un vuelo real
+  const nullIsland = (s.lat!=null && Math.abs(s.lat)<0.5 && Math.abs(s.lon)<0.5);
+  const ready = s.connected && s.lat!=null && s.lon!=null && !nullIsland;
+  showWaiting(!ready, s.connected);
+  if(!ready) return;        // no dibujamos el avión hasta tener una posición real
+  try{
+    updatePlane(s);         // RÁPIDO (~10 Hz): solo alimenta el buffer de interpolación (barato)
+    // PESADO (~1 Hz): panel, ruta, aeropuertos, gráfico. Así 10 lecturas/s NO ahogan el hilo principal.
+    if(performance.now()-lastUi>900){
+      lastUi=performance.now();
+      updatePanel(s);
+      updatePlaneIcon(s);   // cambia el ícono si el tipo de avión cambió
+      updateFPlan(s);       // plan de vuelo del sim (línea magenta)
+      if(!document.getElementById('status-modal').classList.contains('hidden')) renderStatus(s);
+      sampleGraph(s);
+      fetch('/api/route').then(r=>r.json()).then(d=>handleRoute(d.route||[])).catch(()=>{});
+      maybeFetchNav(s.lat,s.lon);
+      maybeFetchDestNav();          // aeropuertos y VOR alrededor del destino
+      if(routeTarget) drawRoute();
+      if(cur && (flags.apt||flags.vor)){ updateCircle(cur);
+        if(!lastAptCenter || haversineNM(cur.lat,cur.lng,lastAptCenter.lat,lastAptCenter.lng)>5) renderNav(cur); }
+      avisarGuardado(s);
+    }
+  }catch(e){ console.error('render:', e); }   // un hipo de dibujado no debe marcar "desconectado"
+}
+function handleRoute(r){
+  lastRoute=r||[];
+  if(lastState) lastState.route=lastRoute;
+  updateRoute(lastRoute);
+}
+
+// ---- Transporte: polling HTTP ----
+// Se probó reemplazar esto por WebSocket (push desde el server) y en la práctica salió
+// PEOR: el servidor de desarrollo de Flask manda-y-duerme de forma secuencial, así que
+// cualquier bache de la red atrasaba directamente el siguiente envío — algo que el
+// polling no sufre, porque cada fetch sale independiente de los demás. Confirmado en
+// el iPad real: se sintió más brusco y más espaciado. Se revirtió a propósito.
 function poll(){
-  fetch('/api/state').then(r=>r.json()).then(s=>{
-    lastState=s;
-    // "null island" (lat 0, lon 0) = estás en el menú del sim, no en un vuelo real
-    const nullIsland = (s.lat!=null && Math.abs(s.lat)<0.5 && Math.abs(s.lon)<0.5);
-    const ready = s.connected && s.lat!=null && s.lon!=null && !nullIsland;
-    showWaiting(!ready, s.connected);
-    if(!ready) return;        // no dibujamos el avión hasta tener una posición real
-    try{
-      updatePlane(s);         // RÁPIDO (~4 Hz): solo alimenta el buffer de interpolación (barato)
-      // PESADO (~1 Hz): panel, ruta, aeropuertos, gráfico. Así 4 lecturas/s NO ahogan el hilo principal.
-      if(performance.now()-lastUi>900){
-        lastUi=performance.now();
-        updatePanel(s);
-        updatePlaneIcon(s);   // cambia el ícono si el tipo de avión cambió
-        updateFPlan(s);       // plan de vuelo del sim (línea magenta)
-        if(!document.getElementById('status-modal').classList.contains('hidden')) renderStatus(s);
-        sampleGraph(s);
-        updateRoute(s.route||[]);
-        maybeFetchNav(s.lat,s.lon);
-        maybeFetchDestNav();          // aeropuertos y VOR alrededor del destino
-        if(routeTarget) drawRoute();
-        if(cur && (flags.apt||flags.vor)){ updateCircle(cur);
-          if(!lastAptCenter || haversineNM(cur.lat,cur.lng,lastAptCenter.lat,lastAptCenter.lng)>5) renderNav(cur); }
-        avisarGuardado(s);
-      }
-    }catch(e){ console.error('render:', e); }   // un hipo de dibujado no debe marcar "desconectado"
-  }).catch(()=>{ showWaiting(true,false); });   // solo si falla la consulta al backend
+  fetch('/api/state').then(r=>r.json()).then(handleState)
+    .catch(()=>{ showWaiting(true,false); });   // solo si falla la consulta al backend
+}
+function startTelemetry(){
+  poll();
+  setInterval(poll,100);   // 10 lecturas por segundo
 }
 
 // El backend cierra el vuelo solo al aterrizar y quedar quieto. Cuando eso pasa manda

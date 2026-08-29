@@ -16,6 +16,7 @@ function showPointMenu(lngLat){
   // Si ya hay una ruta activa, ofrecemos además meterlo como punto intermedio
   el.innerHTML='<button class="lp-btn lp-go">Ir hacia aquí</button>'
     +(routeTarget?'<button class="lp-btn lp-wp">＋ Punto</button>':'')
+    +'<button class="lp-btn lp-cam">🗼 Torre aquí</button>'
     +'<button class="lp-btn lp-tp">✈ Teletransportarme</button>'
     +'<button class="lp-btn lp-x">✕</button>';
   el.querySelector('.lp-go').onclick=()=>{
@@ -26,9 +27,29 @@ function showPointMenu(lngLat){
   };
   const wp=el.querySelector('.lp-wp');
   if(wp) wp.onclick=()=>{ addWaypoint(lngLat.lng, lngLat.lat); closePointMenu(); };
+  el.querySelector('.lp-cam').onclick=()=>{ placeTower2D(lngLat.lat, lngLat.lng); closePointMenu(); };
   el.querySelector('.lp-tp').onclick=()=>showTeleportForm(el, lngLat);
   el.querySelector('.lp-x').onclick=closePointMenu;
   lpMarker=new maplibregl.Marker({element:el, anchor:'bottom', offset:[0,-12]}).setLngLat(lngLat).addTo(map);
+}
+// Cámara de torre en el mapa 2D — misma idea que la de Terreno 3D (ver cesium-3d.js), pero
+// para el mapa normal: centro FIJO en el punto tocado (a lo sumo 5 km del avión, igual que
+// en 3D) y el mapa rota solo para seguir mirando hacia el avión (ver planeFrame en
+// telemetry.js). Nada de esto toca Cesium/Terreno 3D.
+const TOWER2D_MAX_M=5000;
+function placeTower2D(lat,lng){
+  if(!cur) return;
+  let tLat=lat, tLng=lng;
+  const distM=haversineNM(cur.lat,cur.lng,lat,lng)*1852;
+  if(distM>TOWER2D_MAX_M){
+    const brg=bearingTo(cur.lat,cur.lng,lat,lng);
+    const p=dest(cur.lat,cur.lng,brg,TOWER2D_MAX_M);   // [lng,lat]
+    tLng=p[0]; tLat=p[1];
+  }
+  unfollow();
+  towerMode2D=true;
+  towerPoint2D=[tLng,tLat];
+  map.easeTo({center:towerPoint2D, zoom:14, duration:400});
 }
 // Pide altitud y rumbo antes de teletransportar a un punto cualquiera del mapa (no solo
 // pistas de aeropuerto). Precarga los valores actuales del avión como punto de partida.
@@ -335,10 +356,13 @@ window.planRoute=function(btn,lat,lon,icao){
 };
 
 // Deja el destino puesto. `pista` es opcional y solo sirve para mostrarlo en pantalla.
-function fijarDestino(lat,lon,icao,pista){
-  routeTarget={lat:lat, lon:lon, icao:icao, pista:pista||null};
+// `hdg` es el rumbo de esa pista (solo cuando `pista` viene de irAPista): lo guardamos
+// para poder trazar el eje extendido del toggle "Grids".
+function fijarDestino(lat,lon,icao,pista,hdg){
+  routeTarget={lat:lat, lon:lon, icao:icao, pista:pista||null, hdg:(hdg==null?null:hdg)};
   msfsPlanAuto=false;
   drawRoute();
+  updateGrids();
 }
 
 // Aeropuertos cuyas pistas tuvimos que pedirle al backend, para no repetir el pedido
@@ -393,7 +417,7 @@ window.irAPista=function(icao,ri,end){
   const hdg = end===0 ? r.hdg : (r.hdg+180)%360;
   // dest() devuelve [lng,lat]; retrocediendo media pista desde el centro se llega al umbral
   const thr = dest(r.center[0], r.center[1], (hdg+180)%360, r.len_m/2);
-  fijarDestino(thr[1], thr[0], icao, etiqueta);
+  fijarDestino(thr[1], thr[0], icao, etiqueta, hdg);
   showToast('Ruta a '+icao+' · pista '+etiqueta+' · rumbo '+Math.round(hdg)+'°');
 };
 window.clearRoute=function(){ routeTarget=null; routeWaypoints.forEach(w=>w.marker.remove()); routeWaypoints=[];
@@ -402,7 +426,7 @@ window.clearRoute=function(){ routeTarget=null; routeWaypoints.forEach(w=>w.mark
   originApt=null; originRefKey=null; msfsPlanAuto=false;
   progressUserOn=false; syncProgressButton();     // vuelve a bloquear el botón y oculta el panel
   if(typeof closePointMenu==='function') closePointMenu();
-  setAddWp(false); };
+  setAddWp(false); updateGrids(); };
 function setAddWp(on){ addWpMode=on; const b=document.getElementById('rc-addwp'); if(b){ b.textContent=on?'Listo':'＋ punto'; b.classList.toggle('on',on); } }
 function doTeleport(lat,lon,alt,hdg,spd,gear,waitGear,eng0){
   let q='/api/teleport?lat='+lat+'&lon='+lon;
@@ -501,18 +525,17 @@ document.getElementById('sr-plus').onclick=(e)=>{ e.stopPropagation(); cmd('SIM_
 
 function bindToggle(el,key,onchange){ el.addEventListener('click',()=>{ const on=!el.classList.contains('on'); el.classList.toggle('on',on); flags[key]=on; onchange(on); }); }
 function aptCenter(){ return cur || (navRef?{lng:navRef[1],lat:navRef[0]}:null); }
-bindToggle(document.getElementById('tg-apt'),'apt',()=>renderNav(aptCenter()));
-bindToggle(document.getElementById('tg-vor'),'vor',()=>renderNav(aptCenter()));
-// Terreno 3D: exagera un poco la elevación (1.5x) para que el relieve se note incluso
-// volando alto, y prende el sombreado a la par (mismo origen de datos).
+// Aeropuertos y VOR quedaron fijos en "siempre visibles" (flags.apt/vor ya nacen en true
+// y nada los apaga); este toggle era el que los prendía/apagaba, ahora lo ocupa Grids.
+bindToggle(document.getElementById('tg-grids'),'grids',()=>updateGrids());
+// Terreno 3D: ahora es la vista de Cesium (terreno real + modelo real), no el terreno
+// nativo de MapLibre + avión de Three.js de antes (ver cesium-3d.js — ese código viejo
+// queda sin llamar, no borrado, por si hay que volver atrás rápido).
+// setPlaneModelVisible(on) se mantiene: oculta el ícono 2D mientras el modo 3D está
+// activo, para que no quede pegado debajo de Cesium cuando se vuelve a 2D.
 bindToggle(document.getElementById('tg-terrain3d'),'terrain3d',(on)=>{
-  map.setTerrain(on?{source:'terrainSource',exaggeration:1}:null);
-  map.setLayoutProperty('hillshade-3d','visibility',on?'visible':'none');
-  // Con Terreno 3D activo, el trazo recorrido pasa de línea plana drapeada a estela 3D
-  // (cada punto a su altitud real); con terreno apagado volvemos a la línea plana de
-  // siempre. Mismo criterio que el avión: ícono 2D de siempre, o modelo 3D a su altitud real.
-  map.setLayoutProperty('flown','visibility',on?'none':'visible');
   setPlaneModelVisible(on);
+  if(window.cesium3D) window.cesium3D.setActive(on);
 });
 function changeRadius(d){ aptRadius=Math.max(20,Math.min(200,aptRadius+d)); document.getElementById('rad-val').textContent=aptRadius+' NM · '+km(aptRadius)+' km'; renderNav(aptCenter()); }
 document.getElementById('rad-minus').onclick=()=>changeRadius(-20);

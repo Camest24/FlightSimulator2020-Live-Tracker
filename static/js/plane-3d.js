@@ -15,6 +15,8 @@
 // valor por defecto sano.
 function finiteNum(v,fallback){ return (typeof v==='number' && isFinite(v)) ? v : fallback; }
 let curAltFt=0;              // última altitud conocida (pies), la alimenta updatePlane()
+let curOnGround=false;       // ¿el sim reporta el avión en tierra ahora mismo? (cesium-3d.js
+                              // lo usa para anclar la altura renderizada al terreno real)
 let planeModelOn=false;      // ¿modo Terreno 3D activo? controla si este layer dibuja algo
 const TRAIL_WIDTH_M=24;      // ancho total de la cinta de la estela 3D, en metros reales
 // El modelo del avión se arma a mano con primitivas (ver buildPlaneModel), con el morro
@@ -272,7 +274,15 @@ document.querySelectorAll('.layer-opt').forEach(o=>o.addEventListener('click',()
 document.getElementById('btn-layers').addEventListener('click',()=>{ document.getElementById('layers').classList.toggle('hidden'); document.getElementById('btn-layers').classList.toggle('active'); });
 // Los botones de zoom no deben soltar el seguimiento: si estás siguiendo al avión,
 // hacemos el zoom centrado en él en vez de dejar que se corra de la pantalla.
+//
+// En modo Terreno 3D el mapa de MapLibre está oculto (display:none) — zoomear ahí no
+// tiene ningún efecto visible, incómodo justo con el único botón de zoom que hay a mano.
+// planeModelOn es la misma bandera que ya usa el resto del código para saber si el modo
+// 3D está activo (se prende/apaga junto con window.cesium3D.setActive, ver
+// flightplan.js) — si está prendida, redirigimos el click a la cámara de Cesium en vez
+// del mapa 2D.
 function zoomBoton(delta){
+  if(planeModelOn && window.cesium3D){ window.cesium3D.adjustZoom(delta); return; }
   if(followMode && meMarker){ const g=meMarker.getLngLat(); map.easeTo({zoom:map.getZoom()+delta, center:centroSeguir(g.lng,g.lat), duration:280}); }
   else if(delta>0) map.zoomIn(); else map.zoomOut();
 }

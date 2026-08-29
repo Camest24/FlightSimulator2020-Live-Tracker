@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preview: avión en Cesium (sin terreno)</title>
+<!--
+  Prototipo aislado, SIN backend: no toca app.py ni templates/index.html. Simula un vuelo
+  en círculos (mismo movimiento que tools/demo_medellin.py: centro en Medellín, radio 8NM,
+  vuelta cada 4 min, altitud oscilando 7.500-12.500 ft) para poder evaluar cómo se ve la
+  cámara de Cesium siguiendo al avión ANTES de invertir tiempo en conectarlo al resto de
+  la app.
+
+  A propósito, sin terreno/imágenes real: el globo queda invisible por transparencia total
+  (no apagado — ver comentario junto a globe.translucency más abajo) y sin
+  imageryProvider/terrainProvider/geocoder no hace falta ninguna cuenta ni token de Cesium
+  ion — corre 100% offline salvo por cargar la librería del CDN. El terreno real queda
+  pendiente para más adelante (ver docs/ROADMAP.md).
+
+  El avión: modelo real (assets/a320_fixed.glb, un A320-200 de Sketchfab, CC-BY 4.0 de
+  Dlourine, corregido — ver comentario junto a "rootEntity" más abajo). Antes eran 4 cajas
+  a pulso, antes de tener un modelo de verdad para probar.
+-->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.133.1/Widgets/widgets.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.133.1/Cesium.js"></script>
+<style>
+  html,body{ margin:0; height:100%; background:#0b0e14; font-family:system-ui,sans-serif; }
+  #cesiumContainer{ position:absolute; inset:0; }
+  #hud{ position:absolute; top:14px; left:14px; z-index:10; color:#fff; background:rgba(18,22,30,0.55);
+    backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.16); border-radius:12px;
+    padding:12px 16px; font-size:13px; line-height:1.5; max-width:320px; }
+  #hud b{ color:#fbbf24; }
+  #hud .row{ display:flex; justify-content:space-between; gap:12px; }
+  #cesiumContainer .cesium-viewer-bottom{ display:none; }  /* oculta el logo/atribucion del viewer principal: no hay datos reales que atribuir ahi */
+  #minimap{ position:absolute; right:14px; bottom:14px; width:220px; height:220px; z-index:10;
+    border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,0.25);
+    box-shadow:0 4px 18px rgba(0,0,0,0.45); }
+  /* el minimapa SI usa datos reales (OpenStreetMap) -> su atribucion queda visible, achicada nomas */
+  #minimap .cesium-viewer-bottom{ transform:scale(0.72); transform-origin:bottom right; opacity:.85; }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+<div id="hud">
+  <div><b>Preview Cesium</b> — sin terreno, avión de prueba en círculos</div>
+  <div class="row"><span>Altitud</span><span id="v-alt">--</span></div>
+  <div class="row"><span>Rumbo</span><span id="v-hdg">--</span></div>
+  <div style="margin-top:8px;opacity:.75;">
+    Cámara siguiendo al avión (recalculada a mano cada frame). Arrastrá con el mouse para
+    orbitar, rueda para acercar/alejar — el avión se mantiene centrado.
+  </div>
+</div>
+<div id="minimap"></div>
+
+<script>
+// ---- Cesium ion: hace falta una cuenta GRATIS (https://ion.cesium.com) para terreno real
+// e imágenes satelitales reales — es el mismo servicio que usa FlightRadar24 por detrás.
+// Sacá tu token en el dashboard, sección "Access Tokens" (las cuentas nuevas ya traen uno
+// por defecto) y pegalo entre las comillas de abajo. Mientras esté vacío, el prototipo
+// sigue funcionando en modo "globo invisible" (como hasta ahora) — dejarlo vacío no rompe
+// nada, así que es seguro probar el resto sin haber sacado el token todavía.
+const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI5NDFmZTlmNS0xMjRkLTRiM2QtODVjZC1iNTM4MDBlMjYxOTMiLCJpZCI6NDY2ODk5LCJpc3MiOiJodHRwczovL2FwaS5jZXNpdW0uY29tIiwiYXVkIjoidW5kZWZpbmVkX2RlZmF1bHQiLCJpYXQiOjE3ODY1MDU2MzV9.IipiDmYUMJ8hTrcMcFcl5VNRkDHfBjoUtAlQbDY9rbY";
+const hasIonToken = CESIUM_ION_TOKEN.trim().length > 0;
+Cesium.Ion.defaultAccessToken = hasIonToken ? CESIUM_ION_TOKEN : undefined;
+
+const viewer = new Cesium.Viewer('cesiumContainer', {
+  imageryProvider: false,
+  baseLayerPicker: false,
+  geocoder: false,
+  homeButton: false,
+  sceneModePicker: false,
+  navigationHelpButton: false,
+  animation: false,
+  timeline: false,
+  fullscreenButton: false,
+  infoBox: false,
+  selectionIndicator: false,
+  shouldAnimate: true,
+});
+
+if (hasIonToken) {
+  // Terreno real (relieve, montañas) + imágenes satelitales reales, de Cesium ion.
+  // Terrain (con mayúscula, la clase) es el envoltorio que NO explota si el token es
+  // inválido o la carga falla — dispara terrain.errorEvent en vez de romper todo, a
+  // diferencia de usar la función async directo y no manejar el rechazo de la promesa.
+  const terrain = Cesium.Terrain.fromWorldTerrain({ requestWaterMask: true, requestVertexNormals: true });
+  terrain.errorEvent.addEventListener((e) => console.error('Error cargando terreno de Cesium ion:', e));
+  viewer.scene.setTerrain(terrain);
+  Cesium.createWorldImageryAsync().then((provider) => {
+    viewer.imageryLayers.addImageryProvider(provider);
+  }).catch((e) => console.error('Error cargando imágenes de Cesium ion:', e));
+  viewer.scene.globe.show = true;
+  viewer.scene.globe.depthTestAgainstTerrain = true;  // el avión se tapa bien detrás de montañas
+  viewer.scene.skyBox.show = true;
+  viewer.scene.skyAtmosphere.show = true;
+  viewer.scene.fog.enabled = true;                     // referencia de profundidad en el horizonte
+  // Menos exigencia de detalle (default 2) y más caché: con la cámara orbitando rápido
+  // alrededor del avión, pedir tiles de máxima resolución todo el tiempo es lo que se
+  // notaba como "se deja de cargar algo". Bajar el detalle pedido + cachear más tiles ya
+  // vistas alivia bastante (además del suavizado del mouse, ver más abajo).
+  viewer.scene.globe.maximumScreenSpaceError = 3;
+  viewer.scene.globe.tileCacheSize = 1000;
+} else {
+  // Sin token: mismo modo "globo invisible" de antes (ver explicación completa en el
+  // historial — resumen: globe.show=false rompe el elipsoide que Cesium necesita
+  // internamente incluso sin terreno; translucency en 0 lo deja invisible SIN romperlo).
+  viewer.scene.globe.show = true;
+  viewer.scene.globe.translucency.enabled = true;
+  viewer.scene.globe.translucency.frontFaceAlpha = 0.0;
+  viewer.scene.globe.translucency.backFaceAlpha = 0.0;
+  viewer.scene.globe.depthTestAgainstTerrain = false;
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0b0e14');
+  viewer.scene.skyBox.show = false;
+  viewer.scene.skyAtmosphere.show = false;
+  viewer.scene.fog.enabled = false;
+}
+viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0b0e14');
+
+// ---- Vuelo simulado: MISMA matemática que tools/demo_medellin.py, portada a JS ----
+// (centro Medellín, radio 8 NM, vuelta cada 240s, altitud oscila 7.500-12.500ft cada 150s)
+const CENTER_LAT = 6.2442, CENTER_LON = -75.5812;
+const RADIUS_NM = 8.0, LAP_S = 240.0;
+const ALT_CENTER_FT = 10000.0, ALT_AMP_FT = 2500.0, ALT_PERIOD_S = 150.0;
+const NM_PER_DEG_LAT = 60.0;
+
+function circlePoint(t){
+  const ang = (t/LAP_S)*2*Math.PI;
+  const dlat = (RADIUS_NM/NM_PER_DEG_LAT)*Math.cos(ang);
+  const dlon = (RADIUS_NM/(NM_PER_DEG_LAT*Math.cos(CENTER_LAT*Math.PI/180)))*Math.sin(ang);
+  const lat = CENTER_LAT+dlat, lon = CENTER_LON+dlon;
+  const dang = 2*Math.PI/LAP_S;
+  const dlat_dt = -(RADIUS_NM/NM_PER_DEG_LAT)*Math.sin(ang)*dang;
+  const dlon_dt = (RADIUS_NM/(NM_PER_DEG_LAT*Math.cos(CENTER_LAT*Math.PI/180)))*Math.cos(ang)*dang;
+  const hdg = ((Math.atan2(dlon_dt*Math.cos(CENTER_LAT*Math.PI/180), dlat_dt)*180/Math.PI)+360)%360;
+  return {lat, lon, hdg};
+}
+function altitudeFt(t){
+  return ALT_CENTER_FT + ALT_AMP_FT*Math.sin((t/ALT_PERIOD_S)*2*Math.PI);
+}
+
+// ---- El avión: posición del centro (root) + orientación real de vuelo ----
+// Causa REAL de los crashes 'reading longitude' (confirmada leyendo el código fuente de
+// Cesium 1.133, no adivinando): usábamos SampledPositionProperty alimentada a mano, una
+// muestra por cada nuestro tick() propio. Pero Cesium renderiza en SU PROPIO
+// requestAnimationFrame interno, con SU PROPIO reloj (tiempo real) — dos loops
+// independientes. Cuando el reloj interno de Cesium pedía la posición para un instante
+// más nuevo que la última muestra agregada (pasa todo el tiempo: son dos rAF distintos,
+// sin ninguna garantía de orden), SampledPositionProperty no tiene extrapolación por
+// defecto y devuelve undefined. Eso caía en el fallback de localOffset() de más abajo,
+// que devolvía Cartesian3.ZERO — el CENTRO DE LA TIERRA — como si fuera una posición
+// válida. Cesium se rompía después tratando de convertir ESE punto a lat/lon:
+// Ellipsoid.cartesianToCartographic() devuelve undefined en el centro del elipsoide (no
+// hay superficie geodésica que "escalar" ahí), y GeographicProjection.project() lee
+// .longitude de eso sin chequear — el "Cannot read properties of undefined" de siempre.
+//
+// Arreglo de raíz: nada de muestreo. circlePoint(t)/altitudeFt(t) YA son funciones puras
+// — les das cualquier t y te devuelven una posición, sin necesitar que nadie las haya
+// "alimentado" antes. Un epoch fijo (capturado una vez) más un CallbackProperty que
+// convierte cualquier tiempo que Cesium pida a t (segundos desde el epoch) y llama
+// directo a esas funciones. Está definida para CUALQUIER tiempo, siempre — no hay ventana
+// de muestras que se pueda quedar corta, no hay carrera entre dos relojes.
+const epoch = Cesium.JulianDate.now();
+function simSeconds(time){
+  return Cesium.JulianDate.secondsDifference(time, epoch);
+}
+const posProp = new Cesium.CallbackProperty((time)=>{
+  const t = simSeconds(time);
+  const p = circlePoint(t);
+  return Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altitudeFt(t)*0.3048);
+}, false);
+// Causa real de "el modelo siempre apunta al norte": Entity.computeModelMatrix() (la
+// función de Cesium que posiciona el modelo cada frame) tiene un fallback específico —
+// si orientation.getValue() devuelve undefined en el instante consultado, usa
+// automáticamente una orientación fija Este/Norte/Arriba en vez de la real (confirmado
+// leyendo el código fuente de Cesium). Habíamos usado VelocityOrientationProperty, que
+// calcula el rumbo DERIVANDO (comparando la posición en dos instantes muy próximos) —
+// un camino indirecto con casos borde. Nuestra cámara (que llama a orientProp.getValue()
+// directo, con su propio reloj) nunca pisó ese caso, por eso ella sí seguía andando bien
+// y parecía que "la orientación función" — pero Cesium, evaluándola con SU reloj interno,
+// sí lo pisaba. Acá no derivamos nada: circlePoint(t) YA nos da el rumbo exacto (p.hdg),
+// así que armamos el quaternion directo con eso — determinístico, sin depender de dos
+// muestras de posición ni de reloj alguno.
+const orientProp = new Cesium.CallbackProperty((time)=>{
+  const t = simSeconds(time);
+  const p = circlePoint(t);
+  const position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altitudeFt(t)*0.3048);
+  // Roll (banking): diferencia de rumbo entre t y t+0.1s -> velocidad angular de giro ->
+  // ángulo de banqueo proporcional, tope en 25°. Signo: positivo = ala derecha abajo.
+  const dHdg = ((circlePoint(t+0.1).hdg - p.hdg + 540) % 360) - 180;
+  const bankDeg = Cesium.Math.clamp(dHdg * -120, -25, 25);
+  const hpr = new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(p.hdg), Cesium.Math.toRadians(bankDeg), 0);
+  return Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
+}, false);
+
+// ---- Modelo real (GLB de Sketchfab, CC-BY 4.0, Dlourine) en vez de las 4 cajas ----
+// El archivo tal cual venía de Sketchfab NO se podía usar directo: su origen (0,0,0) caía
+// bien afuera de la malla (a ~120 unidades de distancia), sin escala real, y sin garantía
+// de hacia dónde miraba el morro — poner eso directo en position/orientation lo habría
+// hecho aparecer corrido, gigante/diminuto, o mirando para cualquier lado. En vez de
+// adivinar a ojo, leí la geometría real del .glb (bounding box de cada primitiva, matrices
+// de cada nodo) y calculé la corrección: recentrar el origen en el centro de la caja
+// delimitadora, escalar para que el eje más largo mida 37,57 m (largo real de un A320), y
+// rotar para que el morro (asumido hacia -Z, la convención de Blender/Sketchfab más común)
+// quede alineado con +X — el mismo eje "adelante" que ya usa orientProp. Ese resultado se
+// horneó en un nodo raíz nuevo dentro de una copia del archivo (a320_fixed.glb); el
+// original (airbus_a320-200_v2.glb) queda intacto sin tocar.
+// OJO: la dirección del morro es la única parte que fue una suposición fundamentada, no
+// medida — si el avión aparece volando de cola, avisame y es un solo número para arreglar.
+const rootEntity = viewer.entities.add({
+  name: 'avion',
+  position: posProp,
+  orientation: orientProp,
+  model: {
+    uri: 'assets/a320_fixed.glb',
+    minimumPixelSize: 48,   // no lo deja desaparecer aunque la cámara se aleje mucho
+  },
+});
+
+// ---- Minimapa: segundo Viewer en modo 2D, con mapa real (CartoDB, ver nota de CORS más
+// abajo) ---- A propósito NO depende de CESIUM_ION_TOKEN: CartoDB es gratis y sin cuenta (a
+// diferencia de World Imagery/Terrain de arriba), así que el minimapa muestra mapa real
+// SIEMPRE, incluso en modo "globo invisible" cuando no hay token. Es un Viewer aparte (no una
+// capa dentro del principal) porque necesitamos una cámara top-down independiente que siga al
+// avión con su propio zoom fijo, sin pelearse con la cámara-chase de arriba.
+const minimapViewer = new Cesium.Viewer('minimap', {
+  // OJO: "imageryProvider" en el constructor de Viewer está DEPRECADO desde Cesium 1.104
+  // y en 1.133 (la versión que usamos) ya no hace nada si le pasás un provider ahí — el
+  // viewer se crea igual, pero la capa de imagen nunca se agrega (por eso ni un solo
+  // request a cartocdn aparecía en Network: el pedido nunca se disparaba). La forma actual
+  // es "baseLayer" con un ImageryLayer explícito.
+  // Mismo estilo "Voyager" de CartoDB que ya usa static/js/map-setup.js para la capa
+  // "street" del mapa 2D real — con nombres de ciudad, calles, colores tipo Google Maps
+  // (antes tenía dark_nolabels, que se veía todo negro). Misma URL exacta que la app real:
+  // sin {s}/subdomains, ese patrón viejo ya no hace falta con el CDN actual de CartoDB.
+  baseLayer: new Cesium.ImageryLayer(new Cesium.UrlTemplateImageryProvider({
+    url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+    credit: 'Map tiles by CARTO, under CC BY 3.0 — Data by OpenStreetMap, under ODbL.',
+    maximumLevel: 19,
+  })),
+  baseLayerPicker: false,
+  geocoder: false,
+  homeButton: false,
+  sceneModePicker: false,
+  navigationHelpButton: false,
+  animation: false,
+  timeline: false,
+  fullscreenButton: false,
+  infoBox: false,
+  selectionIndicator: false,
+  sceneMode: Cesium.SceneMode.SCENE2D,
+  shouldAnimate: false,
+});
+// Pasivo: solo muestra posición, no es para que el usuario lo arrastre/zoomee (igual que el
+// minimapa de FlightRadar24, que tampoco es interactivo).
+minimapViewer.scene.screenSpaceCameraController.enableInputs = false;
+
+// Icono del avión para el minimapa: un triángulo simple dibujado a mano en un canvas (nada
+// de depender del .glb pesado acá, es solo un marcador 2D). Se dibuja apuntando hacia
+// arriba (Norte) en reposo; la rotación real se aplica cada frame vía billboard.rotation.
+function makePlaneIcon(){
+  const c = document.createElement('canvas');
+  c.width = 32; c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.translate(16, 16);
+  ctx.fillStyle = '#fbbf24';
+  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, -12);   // morro
+  ctx.lineTo(8, 10);    // ala/cola derecha
+  ctx.lineTo(0, 5);     // cola centro
+  ctx.lineTo(-8, 10);   // ala/cola izquierda
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  return c.toDataURL();
+}
+const minimapMarker = minimapViewer.entities.add({
+  position: Cesium.Cartesian3.fromDegrees(CENTER_LON, CENTER_LAT),
+  billboard: {
+    image: makePlaneIcon(),
+    rotation: 0,
+    alignedAxis: Cesium.Cartesian3.ZERO,  // rotación en pantalla, no en el mundo 3D
+    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+  },
+});
+// Altura de cámara fija en el minimapa = "zoom" fijo (en modo 2D, la altura del destino
+// controla el nivel de acercamiento). Ajustá este número para ver más o menos área alrededor.
+const MINIMAP_HEIGHT_M = 60000.0;
+
+// ---- Cámara: orbit manual, centrada en el avión SIEMPRE ----
+// viewer.trackedEntity (dos intentos atrás) resultó no servir para esto: solo actualiza la
+// vista cuando Cesium confirma que terminó de construir la geometría del box y calculó su
+// bounding sphere ese frame — un proceso interno asíncrono — y en la práctica eso nunca se
+// puso "listo", así que la cámara quedaba pegada en el encuadre inicial (lo que reportaste).
+// Acá no hay nada asíncrono: cada frame llamamos lookAtTransform con un offset EXPLÍCITO
+// (nunca lo omitimos, a diferencia del intento anterior — omitirlo es lo que activaba el
+// modo "look" del mouse y descentraba la cámara). El offset se arma con esférica→cartesiana
+// a partir de orbitHeading/orbitPitch/orbitRange, que el mouse va cambiando — así el usuario
+// orbita y hace zoom, y el avión nunca deja de estar exactamente en el centro.
+// Apagamos el controlador de mouse nativo de Cesium: manejamos el mouse nosotros mismos
+// abajo (solo tres números: heading/pitch/range), para no repetir el choque de dos sistemas
+// escribiendo la cámara a la vez.
+viewer.scene.screenSpaceCameraController.enableInputs = false;
+// target* = a dónde quiere ir la cámara (lo que el mouse pide, cambia de golpe). orbit* = a
+// dónde está realmente la cámara ahora mismo (persigue a target* de a poco, ver tick() más
+// abajo). Sin esto, un arrastre rápido saltaba a un ángulo totalmente distinto de un frame a
+// otro, y con terreno real eso obliga a Cesium a pedir un montón de tiles nuevas de golpe —
+// se veía y notaba como que "algo se dejaba de cargar". Con la persecución gradual, el
+// ángulo cambia de a poco cada frame y Cesium tiene tiempo de ir pidiendo tiles a medida que
+// hacen falta, en vez de todas de una.
+let targetHeading = 0, orbitHeading = 0;            // 0 = justo detrás del avión
+let targetPitch = Math.atan2(42, 110), orbitPitch = targetPitch;  // arranca igual que el offset fijo de antes
+let targetRange = Math.hypot(110, 42), orbitRange = targetRange;  // ídem, en metros
+const maxPitch = Cesium.Math.toRadians(85);
+
+// Cesium.ScreenSpaceEventHandler en vez de addEventListener a mano sobre el canvas: es el
+// mecanismo propio de Cesium para esto (el mismo que usa por dentro su controlador nativo),
+// así que no hay dudas de coordenadas, overlays, ni de si el evento realmente llega al
+// canvas correcto — nos ahorra un round-trip entero de "¿por qué no dispara?".
+const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+let dragging = false;
+handler.setInputAction(() => { dragging = true; }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+handler.setInputAction(() => { dragging = false; }, Cesium.ScreenSpaceEventType.LEFT_UP);
+handler.setInputAction((movement) => {
+  if (!dragging) return;
+  const dx = movement.endPosition.x - movement.startPosition.x;
+  const dy = movement.endPosition.y - movement.startPosition.y;
+  targetHeading -= dx * 0.006;
+  targetPitch = Cesium.Math.clamp(targetPitch + dy * 0.006, -maxPitch, maxPitch);
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+handler.setInputAction((wheelDelta) => {
+  // wheelDelta > 0 = rueda hacia arriba/adelante (convención de Cesium) = acercar.
+  targetRange = Cesium.Math.clamp(targetRange * (1 - wheelDelta * 0.0005), 15, 3000);
+}, Cesium.ScreenSpaceEventType.WHEEL);
+
+function orbitOffset(){
+  const ch = Math.cos(orbitPitch);
+  return new Cesium.Cartesian3(
+    -orbitRange * ch * Math.cos(orbitHeading),
+     orbitRange * ch * Math.sin(orbitHeading),
+     orbitRange * Math.sin(orbitPitch)
+  );
+}
+
+// ---- HUD y cámara: todo lee el mismo reloj (epoch) que ya usa posProp, así queda
+// consistente con una sola fuente de tiempo en vez de relojes por separado ----
+function tick(){
+  const now = Cesium.JulianDate.now();
+  const t = simSeconds(now);
+  const p = circlePoint(t);
+  const altFt = altitudeFt(t);
+  const cart = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, altFt*0.3048);
+  document.getElementById('v-alt').textContent = Math.round(altFt).toLocaleString('es')+' ft';
+  document.getElementById('v-hdg').textContent = Math.round(p.hdg)+'°';
+
+  // Minimapa: reusa el mismo p (lat/lon/hdg) que ya calculamos arriba — un solo cálculo de
+  // posición por frame, no dos relojes separados (mismo criterio que el resto del archivo).
+  const groundCart = Cesium.Cartesian3.fromDegrees(p.lon, p.lat);
+  minimapMarker.position = groundCart;
+  // billboard.rotation es un sistema DISTINTO al roll 3D de más arriba (no tiene relación con
+  // el signo de bankDeg) — según la doc de Cesium es en sentido antihorario (CCW) en pantalla,
+  // y el ícono apunta "arriba" (Norte) en reposo. Como el rumbo (hdg) es horario (CW) desde el
+  // Norte, en teoría hace falta el signo negativo para convertir uno al otro. Sin verificarlo
+  // a ojo todavía — si el triangulito apunta al lado contrario de hacia donde vuela, sacá el
+  // signo negativo de acá.
+  minimapMarker.billboard.rotation = Cesium.Math.toRadians(-p.hdg);
+  minimapViewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, MINIMAP_HEIGHT_M),
+  });
+
+  // Perseguir target* de a poco (ver comentario junto a su declaración) — heading es
+  // circular, así que lo acercamos por el camino corto (nunca más de media vuelta) para que
+  // no dé la vuelta larga al cruzar 0°/360°.
+  let dh = targetHeading - orbitHeading;
+  dh = ((dh + Math.PI) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI) - Math.PI;
+  orbitHeading += dh * 0.12;
+  orbitPitch += (targetPitch - orbitPitch) * 0.12;
+  orbitRange += (targetRange - orbitRange) * 0.12;
+
+  const quat = orientProp.getValue(now);
+  if(quat){
+    const rot = Cesium.Matrix3.fromQuaternion(quat, new Cesium.Matrix3());
+    const m4 = Cesium.Matrix4.fromRotationTranslation(rot, cart, new Cesium.Matrix4());
+    viewer.camera.lookAtTransform(m4, orbitOffset());
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

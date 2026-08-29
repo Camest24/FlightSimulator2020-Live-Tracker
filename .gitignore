@@ -11,6 +11,7 @@ data/flights_history.json
 data/simbridge_path.txt
 data/simbridge_exe.txt
 data/simconnect_dll_path.txt
+data/cesium_ion_token.txt
 
 # Python
 __pycache__/
@@ -24,3 +25,6 @@ venv/
 # Sistema
 .DS_Store
 Thumbs.db
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/

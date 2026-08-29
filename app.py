@@ -18,6 +18,7 @@ import urllib.request
 import urllib.parse
 import re
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 # SimConnect solo existe en Windows con MSFS. Envolvemos el import para que el servidor
@@ -62,6 +63,15 @@ from server.simbridge import (SIMBRIDGE_HINT, SIMBRIDGE_GUESSES, SIMBRIDGE_EXES,
 
 app = Flask(__name__)
 
+# Se probó una versión con WebSocket (push) para la telemetría en vez del polling HTTP de
+# abajo. En la práctica, con el servidor de desarrollo de Flask (de por sí no pensado para
+# sostener WebSocket bajo carga) el envío quedó más brusco y más espaciado que el polling
+# simple: el loop del servidor manda-y-duerme de forma SECUENCIAL, así que cualquier demora
+# de red en un ws.send() atrasa directamente el siguiente envío — algo que el polling por
+# HTTP no sufre, porque cada pedido del navegador sale independiente de los demás. Se
+# revirtió a polling HTTP puro a propósito; no reintroducir WebSocket para esto sin medir
+# primero con un servidor de verdad (gunicorn/eventlet), no con el dev server.
+
 # python-simconnect NO es seguro entre hilos: el loop de telemetría y las peticiones web
 # tocan el mismo handle de la DLL y los mismos contadores internos de IDs. Sin este
 # candado, un evento (una avería, las luces) se podía perder o llegar tarde porque se
@@ -71,7 +81,20 @@ last_save = 0
 last_weather_fetch = 0
 prev_sim_clock = None    # último valor del reloj DEL SIMULADOR, para medir el tiempo de vuelo
 prev_wall_clock = None   # reloj de la PC, solo como respaldo si el sim no da la hora
+prev_time_source = None  # 'abs' o 'local': para no comparar reloj_sim de dos fuentes distintas
 last_pos_t = None        # cuándo llegó la última posición, para el umbral de teletransporte
+last_known_sim_rate = 1.0  # último SIMULATION_RATE válido, por si una lectura puntual falla
+
+# Modo debug: `python app.py --debug` arranca sin tocar SimConnect, con un avión de
+# mentira parado en SKRG (José María Córdoba, Rionegro) para probar la interfaz sin
+# tener MSFS abierto. Los botones que mandan comandos al sim (teleport, autopiloto,
+# tren...) siguen sin hacer nada de verdad en este modo: ya están protegidos contra
+# sim_aq/sim_events en None, así que no rompen, pero tampoco hay simulador del otro lado
+# que reaccione. Sirve para el resto de la interfaz: mapa, paneles, capas, historial.
+DEBUG_MODE = "--debug" in sys.argv
+DEBUG_AIRPORT_ICAO = "SKRG"
+DEBUG_FALLBACK_LATLON = (6.1645, -75.4231)   # SKRG, por si la base de aeropuertos no cargó a tiempo
+DEBUG_FALLBACK_ELEV_FT = 7031.0
 
 # Cierre automático del vuelo. Antes el vuelo SOLO pasaba al historial al tocar
 # "Reiniciar ruta": si aterrizabas y cerrabas la app, se perdía. Ahora lo guardamos solos
@@ -81,6 +104,9 @@ quieto_desde = None        # desde cuándo está detenido en tierra, después de
 vuelo_archivado = False    # ya lo mandamos al historial: no lo repetimos
 sim_aq = None       # AircraftRequests, para setear posición/variables (teletransporte)
 sim_events = None   # AircraftEvents, para disparar eventos (ej. bajar el tren)
+sim_raw = None      # objeto SimConnect() crudo, SOLO para camera_jump_to() (ver más abajo):
+                     # necesita el handle y el binding de bajo nivel (.dll), algo que
+                     # AircraftRequests/AircraftEvents no exponen.
 
 
 def _gear_down():
@@ -317,24 +343,187 @@ def set_aircraft(alt=None, hdg=None, pitch=None, spd=None):
         return False
 
 
-def set_sim_time(zulu_seconds=None):
-    """Cambia la hora del reloj del sim (ZULU/UTC), en segundos desde medianoche.
-    Nota: solo la hora (beta). El clima real vía SimConnect en MSFS2020 no tiene un método
-    confiable de "set" directo (a diferencia de la hora) — hay que cambiarlo desde el propio
-    menú de clima del juego por ahora."""
-    if sim_aq is None or zulu_seconds is None:
+def set_sim_time(hh=None, mm=None):
+    """Cambia la hora del reloj del sim (ZULU/UTC).
+    Nota: ZULU_TIME es una SimVar de SOLO LECTURA en SimConnect (por eso `.set()` no
+    rompía pero tampoco hacía nada — fallaba en silencio). La forma soportada de cambiar
+    la hora es disparando los EVENTOS ZULU_HOURS_SET / ZULU_MINUTES_SET, igual que ya
+    hacemos con el autopiloto en set_autopilot(). El clima real, aparte, sigue sin tener
+    un "set" confiable — hay que cambiarlo desde el menú de clima del juego por ahora."""
+    if sim_events is None or hh is None or mm is None:
         return False
     try:
         with sim_lock:
-            sim_aq.set("ZULU_TIME", float(zulu_seconds))
+            eh = sim_events.find("ZULU_HOURS_SET")
+            em = sim_events.find("ZULU_MINUTES_SET")
+            if eh is None or em is None:
+                return False
+            eh(int(hh))
+            em(int(mm))
         return True
     except Exception:
         return False
 
 
+def camera_jump_to(lat, lon):
+    """EXPERIMENTAL — NO usado por la UI todavía, solo para pruebas manuales vía
+    /api/camera_test. Intenta saltar la cámara ACTIVA del sim (la del jugador, ej. la
+    cámara libre/drone) al punto (lat, lon) dado, usando SimConnect_CameraSetRelative6DOF.
+
+    Contexto importante (para quien retome esto):
+    - Esta función de SimConnect está marcada como OBSOLETA / sin mantenimiento por Asobo
+      (foro de soporte oficial: "obsolete in MSFS SDK context and is not maintained...
+      this call causes rendering and performance issues"). Hay reportes de que puede dejar
+      la cámara totalmente trabada (no gira, no hace zoom) después de usarla.
+    - La librería SimConnect (pip) tiene el binding crudo en Attributes.py pero con un bug:
+      le falta el primer argtype HANDLE. Por eso lo redeclaramos acá antes de llamarlo.
+    - Los deltas X/Y/Z son relativos al AVIÓN (no al mundo), según la doc histórica de
+      FSX/P3D. SUPOSICIÓN SIN VERIFICAR contra doc actual de MSFS — puede que el signo o
+      el eje esté invertido. Necesita calibrarse mirando qué pasa en pantalla.
+    - Devuelve un dict con el resultado y los deltas calculados, para poder ver en la
+      respuesta del endpoint qué se mandó exactamente.
+    """
+    from ctypes import c_float
+    from ctypes.wintypes import HANDLE
+    global sim_raw
+    if sim_raw is None:
+        return {"ok": False, "reason": "sin conexión a SimConnect"}
+    if lat is None or lon is None:
+        return {"ok": False, "reason": "faltan lat/lon"}
+    st = dict(state)
+    plane_lat, plane_lon = st.get("lat"), st.get("lon")
+    hdg = st.get("heading") or 0.0
+    if plane_lat is None or plane_lon is None:
+        return {"ok": False, "reason": "todavía no hay posición del avión"}
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "lat/lon inválidos"}
+
+    dist_m = _haversine_nm(plane_lat, plane_lon, lat, lon) * 1852.0
+    brg_deg = _bearing(plane_lat, plane_lon, lat, lon)
+    brg_rad = math.radians(brg_deg)
+    d_east = dist_m * math.sin(brg_rad)
+    d_north = dist_m * math.cos(brg_rad)
+
+    # SUPOSICIÓN SIN VERIFICAR: rotamos el offset este/norte al frame del avión
+    # (lateral=X, vertical=Y, adelante/atrás=Z), usando el heading actual.
+    hdg_rad = math.radians(hdg)
+    dx = d_east * math.cos(hdg_rad) - d_north * math.sin(hdg_rad)
+    dz = d_east * math.sin(hdg_rad) + d_north * math.cos(hdg_rad)
+    dy = 0.0
+
+    IGNORE = -1.0   # SIMCONNECT_CAMERA_IGNORE_FIELD (SimConnect/Constants.py), no reexportado
+
+    auto_reset = False
+    try:
+        with sim_lock:
+            fn = sim_raw.dll.CameraSetRelative6DOF
+            # Corrigiendo el bug de la librería: le falta el HANDLE como primer argtype.
+            fn.argtypes = [HANDLE, c_float, c_float, c_float, c_float, c_float, c_float]
+            hr = fn(sim_raw.hSimConnect,
+                    c_float(dx), c_float(dy), c_float(dz),
+                    c_float(IGNORE), c_float(IGNORE), c_float(IGNORE))
+            # La cámara suele quedar TRABADA después de esto (confirmado por Asobo y por
+            # pruebas reales). El usuario notó que salir de la cámara y volver a entrar la
+            # destraba. Intentamos automatizar exactamente eso disparando NEXT_VIEW y
+            # PREV_VIEW (cicla a la vista siguiente y vuelve) — es un intento, no una
+            # solución confirmada; si falla no rompe el resultado principal del salto.
+            if sim_events is not None:
+                try:
+                    ev_next = sim_events.find("NEXT_VIEW")
+                    ev_prev = sim_events.find("PREV_VIEW")
+                    if ev_next is not None and ev_prev is not None:
+                        ev_next()
+                        time.sleep(0.15)
+                        ev_prev()
+                        auto_reset = True
+                except Exception:
+                    pass
+        return {
+            "ok": True, "hresult": int(hr), "auto_reset_attempted": auto_reset,
+            "dx": round(dx, 1), "dy": round(dy, 1), "dz": round(dz, 1),
+            "dist_m": round(dist_m, 1), "brg_deg": round(brg_deg, 1),
+        }
+    except Exception as e:
+        return {"ok": False, "reason": str(e)}
+
+
+def _debug_position():
+    """Dónde parar el avión de mentira: el SKRG real (con su elevación) si la base de
+    aeropuertos ya cargó, si no el fallback hardcodeado (arranca igual sin esperar la
+    descarga de OurAirports ni depender de tener internet)."""
+    for a in NAV["airports"]:
+        if a["icao"].upper() == DEBUG_AIRPORT_ICAO:
+            try:
+                elev = float(a["elev_ft"])
+            except (TypeError, ValueError):
+                elev = DEBUG_FALLBACK_ELEV_FT
+            return a["lat"], a["lon"], elev
+    lat, lon = DEBUG_FALLBACK_LATLON
+    return lat, lon, DEBUG_FALLBACK_ELEV_FT
+
+
+def _debug_telemetry_loop():
+    """Reemplazo de telemetry_loop() para --debug: nunca toca SimConnect. Avión quieto en
+    la pista de SKRG, con datos estáticos coherentes, para probar mapa/paneles/capas sin
+    tener MSFS abierto. No incrementa elapsed_min ni dispara el archivado automático de
+    vuelo: como on_ground nunca deja de ser True, _revisar_fin_de_vuelo() lo ignora
+    (fue_al_aire nunca pasa a True porque el avión nunca despega)."""
+    # Espera corta a que load_navdata() (lanzado en paralelo) resuelva el aeropuerto real;
+    # si tarda o falla, seguimos con el fallback en vez de dejar la app sin arrancar.
+    esperado = time.time() + 8
+    while not NAV["ready"] and time.time() < esperado:
+        time.sleep(0.5)
+    lat, lon, elev = _debug_position()
+
+    with lock:
+        state["debug"] = True
+        state["connected"] = True
+        state["lat"] = lat
+        state["lon"] = lon
+        state["alt"] = elev
+        state["heading"] = 0.0
+        state["gs"] = 0.0
+        state["ias"] = 0.0
+        state["vs"] = 0.0
+        state["on_ground"] = True
+        state["gear_pct"] = 1.0
+        state["flaps_pct"] = 0.0
+        state["flaps_index"] = 0
+        state["spoilers_pct"] = 0.0
+        state["parking_brake"] = True
+        state["eng_type"] = 1
+        state["eng_count"] = 2
+        state["aircraft"] = "DEBUG · estático en " + DEBUG_AIRPORT_ICAO
+        state["mach"] = 0.0
+        state["sim_rate"] = 1.0
+        state["pausado"] = False
+        state["magvar"] = 0.0
+        state["fplan"] = None
+        state["lights"] = {"landing": False, "beacon": True, "strobe": False, "nav": True, "taxi": False}
+        state["ap"] = {"master": False, "hdg_lock": False, "alt_lock": False, "spd_lock": False,
+                        "hdg": 0.0, "alt": elev, "spd": 0.0}
+        state["fuel_gal"] = 500.0
+        state["fuel_capacity"] = 1000.0
+        state["fuel_flow_gph"] = 0.0
+        state["endurance_min"] = None
+        state["distance_nm"] = 0.0
+        state["max_alt"] = elev
+        state["flight_start"] = None
+        state["elapsed_min"] = 0
+
+    while True:
+        with lock:
+            state["local_time"] = time.time() % 86400
+            state["reloj_sim"] = state["local_time"]
+        time.sleep(1)
+
+
 def telemetry_loop():
-    global last_save, last_weather_fetch, sim_aq, sim_events, last_pos_t
-    global prev_sim_clock, prev_wall_clock
+    global last_save, last_weather_fetch, sim_aq, sim_events, sim_raw, last_pos_t
+    global prev_sim_clock, prev_wall_clock, prev_time_source, last_known_sim_rate
     sm = None
     aq = None
     consecutive_errors = 0
@@ -353,6 +542,7 @@ def telemetry_loop():
                 sm = SimConnect()
                 aq = AircraftRequests(sm, _time=100)   # caché más fresco para 4 Hz
                 sim_aq = aq
+                sim_raw = sm   # objeto crudo, lo necesita camera_jump_to() (ver más abajo)
                 try:
                     sim_events = AircraftEvents(sm)
                 except Exception:
@@ -381,6 +571,15 @@ def telemetry_loop():
             # SimConnect devuelve el rumbo en RADIANES pese al nombre de la variable.
             if heading is not None:
                 heading = math.degrees(heading) % 360
+            # Banqueo REAL del avión (no estimado): antes el frontend trataba de adivinar
+            # el ángulo de banco derivando la velocidad de giro del rumbo entre muestras —
+            # fràgil (dependía del framerate/buffer del lado del cliente) y seguía
+            # "destellando" en las curvas. SimConnect ya lo expone directo, igual que
+            # VERTICAL_SPEED para el cabeceo (ver cesium-3d.js, que sí funcionó bien de
+            # entrada con vs). Mismo signo raro que el rumbo: viene en radianes.
+            bank = _safe_get(aq, "PLANE_BANK_DEGREES")
+            if bank is not None:
+                bank = math.degrees(bank)
             gs = _safe_get(aq, "GROUND_VELOCITY")
             ias = _safe_get(aq, "AIRSPEED_INDICATED")
             vs = _safe_get(aq, "VERTICAL_SPEED")
@@ -482,6 +681,7 @@ def telemetry_loop():
                 state["lon"] = lon
                 state["alt"] = alt
                 state["heading"] = heading
+                state["bank"] = bank
                 state["gs"] = gs
                 state["ias"] = ias
                 state["vs"] = vs
@@ -530,12 +730,23 @@ def telemetry_loop():
                 if pausado:
                     prev_sim_clock = reloj_sim = None
                     prev_wall_clock = None
+                    prev_time_source = None
                 else:
                     reloj_sim = abs_time if abs_time is not None else local_time
+                cur_time_source = None if reloj_sim is None else ("abs" if abs_time is not None else "local")
                 if reloj_sim is not None:
-                    if prev_sim_clock is not None:
+                    # ABSOLUTE_TIME (segundos desde 1900) y LOCAL_TIME (segundos desde
+                    # medianoche) son magnitudes completamente distintas. Antes, si una sola
+                    # lectura de ABSOLUTE_TIME fallaba (más frecuente cuanto más rápido corre
+                    # el sim rate, según reportado con x4), el código caía a LOCAL_TIME por un
+                    # tick y comparaba contra el prev_sim_clock viejo basado en ABSOLUTE_TIME:
+                    # eso da un "salto atrás" de miles de millones de segundos, que disparaba
+                    # el reinicio de vuelo de más abajo SIN que el vuelo se haya reiniciado de
+                    # verdad. Por eso: si la fuente cambió respecto a la muestra anterior, no
+                    # comparamos — solo re-anclamos el reloj con la fuente nueva y seguimos.
+                    if prev_sim_clock is not None and prev_time_source == cur_time_source:
                         d = reloj_sim - prev_sim_clock
-                        if abs_time is None and d < -43200:   # LOCAL_TIME cruzó medianoche
+                        if cur_time_source == "local" and d < -43200:   # LOCAL_TIME cruzó medianoche
                             d += 86400
                         if 0 < d < 120:         # descartamos saltos (cambiaste la hora)
                             state["elapsed_min"] += d / 60.0
@@ -557,6 +768,7 @@ def telemetry_loop():
                             state["weather"] = None
                             last_weather_fetch = 0
                     prev_sim_clock = reloj_sim
+                    prev_time_source = cur_time_source
                     prev_wall_clock = None      # volvió el reloj del sim: soltamos el de la PC
                 elif pausado:
                     pass                        # en pausa no se cuenta nada, y punto
@@ -579,7 +791,13 @@ def telemetry_loop():
                 now_t = time.time()
                 dt = max(0.05, now_t - (last_pos_t or now_t))
                 last_pos_t = now_t
-                rate = float(sim_rate) if sim_rate else 1.0
+                # Si esta lectura puntual de SIMULATION_RATE falló, usamos la última válida
+                # en vez de asumir 1.0 a secas: con sim rate alto (x4, x8...) un solo hueco acá
+                # subestimaba mucho lo que el avión pudo recorrer y disparaba un reinicio de
+                # vuelo falso ("salto imposible" que en realidad era vuelo normal acelerado).
+                if sim_rate:
+                    last_known_sim_rate = float(sim_rate)
+                rate = last_known_sim_rate
                 posible = (float(gs or 600) / 3600.0) * rate * dt * 3.0 + 1.0
                 if route and _haversine_nm(route[-1][0], route[-1][1], lat, lon) > max(2.7, posible):
                     route.clear()
@@ -630,16 +848,28 @@ def telemetry_loop():
                 aq = None
                 sim_aq = None
                 sim_events = None
+                sim_raw = None
                 prev_sim_clock = None     # al reconectar, no arrastramos el reloj viejo
                 prev_wall_clock = None
-                last_pos_t = None
+                prev_time_source = None
+                # last_pos_t NO se resetea a propósito: si lo hiciéramos, el próximo dt
+                # daría ~0 en vez de reflejar lo que duró el corte, y el cálculo de
+                # "distancia posible" (más abajo) subestimaría muchísimo cuánto pudo
+                # avanzar el avión mientras estuvimos desconectados. Eso disparaba un
+                # falso "salto imposible" que reiniciaba el vuelo entero al reconectar
+                # (más notorio cuanto más rápido volabas, porque más lejos llegabas
+                # durante el corte). Dejando el last_pos_t viejo, el dt del próximo tick
+                # incluye el tiempo real del corte y el margen se calcula bien.
                 consecutive_errors = 0
                 time.sleep(3)
             else:
                 time.sleep(1)
             continue
 
-        time.sleep(0.25)   # 4 lecturas por segundo (para un movimiento más fluido en el mapa)
+        time.sleep(0.1)   # 10 lecturas por segundo (subido de 4 — ver AircraftRequests(_time=100)
+                          # más arriba: 100ms de caché interna en SimConnect, así que 10Hz es
+                          # exactamente el techo real — pedir más rápido no traería datos más
+                          # frescos, solo trabajo de más).
 
 
 
@@ -674,15 +904,62 @@ def _no_cache(resp):
     return resp
 
 
+def _cesium_ion_token():
+    """Mismo patrón que simconnect_dll_path.txt: un archivo de una línea en data/, no
+    commiteado (ver .gitignore), para no hardcodear el token personal en el HTML. Sin el
+    archivo, el modo Terreno 3D simplemente no tiene terreno/imágenes reales (ver
+    cesium-3d.js) — no rompe nada, solo se degrada."""
+    hint_file = os.path.join(DATA_DIR, "cesium_ion_token.txt")
+    if os.path.exists(hint_file):
+        try:
+            with open(hint_file, "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except Exception:
+            return ""
+    return ""
+
+
+def _cesium3d_version():
+    """Fecha de modificación de cesium-3d.js como query string (?v=...) del <script> que lo
+    carga. Sin esto, el navegador (sobre todo Safari/iOS, que cachea agresivo) puede seguir
+    sirviendo una versión vieja del archivo después de un cambio aunque hagas F5 — pasó en
+    vivo probando en iPad. Al cambiar el archivo, cambia el mtime, cambia la URL, y el
+    navegador la trata como un recurso nuevo sin que haga falta pedirle un hard-refresh."""
+    try:
+        path = os.path.join(BASE_DIR, "static", "js", "cesium-3d.js")
+        return str(int(os.path.getmtime(path)))
+    except Exception:
+        return "0"
+
+
 @app.route("/")
 def index():
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        cesium_ion_token=_cesium_ion_token(),
+        cesium3d_version=_cesium3d_version(),
+    )
 
 
 @app.route("/api/state")
 def api_state():
+    # OJO: a propósito SIN la ruta acá. `route` puede tener hasta MAX_ROUTE_POINTS (6000)
+    # puntos, y este endpoint se pide 10 veces por segundo (ver poll() en tools-ui.js) — el
+    # frontend solo necesita la ruta completa ~1 vez por segundo (updateRoute/drawRoute están
+    # dentro del bloque "pesado" gateado a 900ms). Mandarla en cada tick significa serializar
+    # y transferir un JSON de cientos de KB 10x/seg, incluso en los 9 de cada 10 pedidos que
+    # ni la usan: eso es lo que hacía que "el mapa se mueva fluido pero el avión se actualice
+    # cada mucho" (el fetch tardaba más que los 100ms del intervalo, así que las lecturas
+    # nuevas se acumulaban esperando red en vez de llegar al buffer de interpolación a tiempo).
+    # La ruta ahora vive en /api/route, pedida aparte y con menos frecuencia.
     with lock:
-        return jsonify({**state, "route": route})
+        return jsonify({**state})
+
+
+@app.route("/api/route")
+def api_route():
+    with lock:
+        return jsonify({"route": route})
 
 
 @app.route("/api/reset", methods=["POST"])
@@ -743,7 +1020,22 @@ def api_set_time():
         return jsonify({"ok": False})
     if not (0 <= hh <= 23 and 0 <= mm <= 59):
         return jsonify({"ok": False})
-    return jsonify({"ok": set_sim_time(hh * 3600 + mm * 60)})
+    return jsonify({"ok": set_sim_time(hh, mm)})
+
+
+@app.route("/api/camera_test")
+def api_camera_test():
+    """EXPERIMENTAL, NO ligado a ningún botón de la UI todavía.
+    Prueba manual: /api/camera_test?lat=...&lon=...
+    Intenta mandar la cámara activa del sim (ej. la cámara libre/drone, Insert) al punto
+    dado. Ver camera_jump_to() más arriba para el contexto completo de por qué esto es
+    un experimento de resultado incierto (función de SimConnect obsoleta)."""
+    try:
+        lat = float(request.args.get("lat"))
+        lon = float(request.args.get("lon"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "reason": "faltan/inválidos lat y lon"})
+    return jsonify(camera_jump_to(lat, lon))
 
 
 @app.route("/api/search")
@@ -1153,11 +1445,22 @@ def _pos_actual():
 
 
 if __name__ == "__main__":
-    load_current_flight()
-    threading.Thread(target=telemetry_loop, daemon=True).start()
+    if not DEBUG_MODE:
+        load_current_flight()
+    threading.Thread(target=(_debug_telemetry_loop if DEBUG_MODE else telemetry_loop), daemon=True).start()
     threading.Thread(target=load_navdata, daemon=True).start()
-    if LIVE_AIRWAYS_AVAILABLE:
+    if DEBUG_MODE:
+        print("Modo DEBUG: avion estatico en " + DEBUG_AIRPORT_ICAO + ", sin tocar SimConnect.")
+    elif LIVE_AIRWAYS_AVAILABLE:
         threading.Thread(target=live_airways.run, args=(AWY, _pos_actual, DATA_DIR), daemon=True).start()
 
     # host="0.0.0.0" => accesible desde el celular/iPad en la misma red (no solo localhost)
-    app.run(host="0.0.0.0", debug=True, port=5001, use_reloader=False)
+    # threaded=True: sin esto, Werkzeug atiende un request HTTP a la vez, en serie — con
+    # /api/state pidiendo ahora 10 veces por segundo, cualquier otro pedido que tarde un
+    # poco (ej. /api/navdata, una consulta geoespacial) bloqueaba toda la cola detrás,
+    # telemetría incluida. Eso es lo que se veía como "el avión se actualiza 1 vez por
+    # segundo" mientras la escena 3D (puramente del lado del navegador) rendía normal. Es
+    # seguro: todo el estado compartido (state, acceso a SimConnect) ya pasa por
+    # threading.Lock/RLock (ver lock/sim_lock en server/core.py), pensado desde el
+    # principio para convivir con el hilo de telemetry_loop.
+    app.run(host="0.0.0.0", debug=True, port=5001, use_reloader=False, threaded=True)

@@ -43,8 +43,12 @@ function popup(html){ return new maplibregl.Popup({offset:16,closeButton:false})
 function acftEl(cls,svg,hdg){ const el=document.createElement('div'); el.innerHTML=`<div class="acft-inner ${cls}" style="transform:rotate(${hdg}deg)">${svg}</div>`; return el; }
 
 let followMode=true, meMarker=null, meInner=null;
+// Cámara de torre en el mapa 2D (ver flightplan.js/placeTower2D y telemetry.js/planeFrame):
+// centro FIJO en towerPoint2D, con el mapa rotando solo para seguir mirando al avión —
+// nada de esto toca Terreno 3D/Cesium, es la versión 2D de la misma idea.
+let towerMode2D=false, towerPoint2D=null;
 let aptMarkers=[], vorMarkers=[];
-const flags={apt:true,vor:true,terrain3d:false};
+const flags={apt:true,vor:true,terrain3d:false,grids:false};
 let navRef=null, navAirports=[], navVors=[];
 let aptRadius=60, lastAptCenter=null;   // radio de aeropuertos (NM)
 let routeTarget=null;                    // {lat,lon,icao} destino de la ruta
@@ -83,6 +87,17 @@ map.on('load',()=>{
   // Círculo del radio de aeropuertos
   map.addSource('aptcircle',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'aptcircle',type:'line',source:'aptcircle',paint:{'line-color':'#2f6df6','line-width':1.6,'line-dasharray':[3,3],'line-opacity':0.85}});
+  // Toggle "Grids": retícula de lat/lon (siempre que está prendido) + eje de pista
+  // extendido para el destino elegido (solo si hay una pista concreta, con rumbo).
+  map.addSource('coordgrid',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'coordgrid-line',type:'line',source:'coordgrid',filter:['==',['geometry-type'],'LineString'],paint:{'line-color':'#94a3b8','line-width':1,'line-opacity':0.5}});
+  map.addLayer({id:'coordgrid-label',type:'symbol',source:'coordgrid',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','label'],'text-font':['Noto Sans Bold'],'text-size':10.5,'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#cbd5e1','text-halo-color':'rgba(10,10,20,0.85)','text-halo-width':1.4}});
+  map.addSource('rwyaxis',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
+  map.addLayer({id:'rwyaxis-line',type:'line',source:'rwyaxis',filter:['==',['geometry-type'],'LineString'],paint:{'line-color':'#facc15','line-width':2,'line-dasharray':[1,2]}});
+  map.addLayer({id:'rwyaxis-tick',type:'circle',source:'rwyaxis',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':3,'circle-color':'#facc15','circle-stroke-color':'#1e293b','circle-stroke-width':1}});
+  map.addLayer({id:'rwyaxis-label',type:'symbol',source:'rwyaxis',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','label'],'text-font':['Noto Sans Bold'],'text-size':11,'text-offset':[0,-1.1],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#facc15','text-halo-color':'rgba(10,10,20,0.85)','text-halo-width':1.6}});
+  map.on('moveend',updateGrids);
+  map.on('zoomend',updateGrids);
   // La etiqueta de la ruta va al tope de la pila: si no, la línea magenta del plan de
   // MSFS se dibuja encima y el texto queda tapado.
   map.moveLayer('planroute-label');
@@ -92,7 +107,9 @@ map.on('load',()=>{
   const v = FPLAN_LINE_VISIBLE ? 'visible' : 'none';
   map.setLayoutProperty('fplan-line','visibility',v);
   map.setLayoutProperty('fplan-pt','visibility',v);
-  poll(); setInterval(poll,250);   // 4 lecturas por segundo
+  // Polling HTTP a 10 lecturas por segundo (ver startTelemetry() en tools-ui.js). Se probó
+  // reemplazar esto por WebSocket y salió peor en la práctica — ver comentario ahí mismo.
+  startTelemetry();
 });
 
 // El estado del seguimiento se ve en el botón de la barra (encendido/apagado),
@@ -102,7 +119,22 @@ function unfollow(){ if(!followMode) return;
   document.getElementById('btn-center').classList.remove('active'); }
 map.on('dragstart',unfollow);
 map.on('click',(e)=>{
-  if(addWpMode && routeTarget){ addWaypoint(e.lngLat.lng, e.lngLat.lat); return; }   // modo agregar punto
+  if(addWpMode && routeTarget){
+    // Si el toque cae cerca de una marca del eje de pista (5/10/15/20 NM, toggle "Grids"),
+    // el punto se agrega EXACTO ahí en vez de en el pixel bajo el dedo: a mano es casi
+    // imposible acertarle a un círculo de 3px, sobre todo en el celular. El radio de
+    // tolerancia es en pantalla (px), no en distancia real, así que no depende del zoom.
+    const tol=10;
+    const hits=map.queryRenderedFeatures(
+      [[e.point.x-tol,e.point.y-tol],[e.point.x+tol,e.point.y+tol]], {layers:['rwyaxis-tick']});
+    if(hits.length){
+      const c=hits[0].geometry.coordinates;
+      addWaypoint(c[0], c[1], hits[0].properties.label);
+    } else {
+      addWaypoint(e.lngLat.lng, e.lngLat.lat);
+    }
+    return;   // modo agregar punto
+  }
   if(lpMarker){ closePointMenu(); return; }
   // ↑ Antes esto era "return" a secas: el primer clic (el que ABRE el menú de pulsación
   // larga) queda absorbido acá para no encadenar un unfollow() de más. El problema era
@@ -114,6 +146,20 @@ map.on('click',(e)=>{
 });
 function follow(){ followMode=true; document.getElementById('btn-center').classList.add('active'); }
 document.getElementById('btn-center').onclick=()=>{
+  // En modo Terreno 3D la cámara YA está siempre centrada en el avión (no hay "soltar
+  // seguimiento" ahí, a diferencia del mapa 2D) — acá el botón cambia de sentido: resetea
+  // la órbita a la vista default, derecho detrás del avión, por si quedó mirando desde
+  // cualquier otro ángulo por un drag anterior.
+  if(planeModelOn && window.cesium3D){ window.cesium3D.recenter(); return; }
+  // Salir de la cámara de torre 2D: mismo botón de siempre, vuelve derecho a seguir al
+  // avión en vez de quedar plantado en el punto que tocaste.
+  if(towerMode2D){
+    towerMode2D=false; towerPoint2D=null;
+    map.setBearing(0);
+    follow();
+    if(meMarker){ const g=meMarker.getLngLat(); map.easeTo({center:centroSeguir(g.lng,g.lat)}); }
+    return;
+  }
   if(followMode){ unfollow(); }
   else { follow(); if(meMarker){ const g=meMarker.getLngLat(); map.easeTo({center:centroSeguir(g.lng,g.lat)}); } }
 };
@@ -121,3 +167,51 @@ document.getElementById('btn-center').onclick=()=>{
 // ---- Plan de vuelo (ruta directa + teletransporte beta) ----
 function haversineNM(la1,lo1,la2,lo2){ const R=3440.065,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;
   const a=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2; return 2*R*Math.asin(Math.sqrt(a)); }
+
+// ---- Grids: retícula de coordenadas + eje de pista extendido (ver toggle "Grids") ----
+// El paso de la retícula se achica con el zoom, para que nunca queden ni 2 líneas
+// perdidas (muy alejado) ni un enrejado ilegible (muy cerca).
+function gridStepDeg(){
+  const z=map.getZoom();
+  if(z>=11) return 0.05;
+  if(z>=9) return 0.1;
+  if(z>=7) return 0.5;
+  if(z>=5) return 1;
+  return 2;
+}
+function drawCoordGrid(){
+  const src=map.getSource('coordgrid'); if(!src) return;
+  if(!flags.grids){ src.setData({type:'FeatureCollection',features:[]}); return; }
+  const b=map.getBounds(), step=gridStepDeg();
+  const lonMin=Math.floor(b.getWest()/step)*step, lonMax=Math.ceil(b.getEast()/step)*step;
+  const latMin=Math.floor(b.getSouth()/step)*step, latMax=Math.ceil(b.getNorth()/step)*step;
+  const dec=step<0.1?3:(step<1?2:0), feats=[];
+  for(let la=latMin; la<=latMax+1e-9; la+=step){
+    feats.push({type:'Feature',geometry:{type:'LineString',coordinates:[[lonMin,la],[lonMax,la]]},properties:{}});
+    feats.push({type:'Feature',geometry:{type:'Point',coordinates:[lonMin,la]},properties:{label:la.toFixed(dec)+'°'}});
+  }
+  for(let lo=lonMin; lo<=lonMax+1e-9; lo+=step){
+    feats.push({type:'Feature',geometry:{type:'LineString',coordinates:[[lo,latMin],[lo,latMax]]},properties:{}});
+    feats.push({type:'Feature',geometry:{type:'Point',coordinates:[lo,latMax]},properties:{label:lo.toFixed(dec)+'°'}});
+  }
+  src.setData({type:'FeatureCollection',features:feats});
+}
+// Curso de aproximación extendido de la pista elegida como destino (routeTarget.hdg):
+// una línea saliendo del umbral hacia atrás, con marcas cada 5 NM, para alinear los
+// puntos de la ruta con el eje real de la pista en vez de a ojo.
+function drawRwyAxis(){
+  const src=map.getSource('rwyaxis'); if(!src) return;
+  if(!flags.grids || !routeTarget || !routeTarget.pista || routeTarget.hdg==null){
+    src.setData({type:'FeatureCollection',features:[]}); return;
+  }
+  const {lat,lon,hdg}=routeTarget, back=(hdg+180)%360, maxNm=20, stepNm=5;
+  const coords=[[lon,lat]], feats=[];
+  for(let d=stepNm; d<=maxNm; d+=stepNm){
+    const p=dest(lat,lon,back,d*1852);
+    coords.push(p);
+    feats.push({type:'Feature',geometry:{type:'Point',coordinates:p},properties:{label:d+' NM'}});
+  }
+  feats.unshift({type:'Feature',geometry:{type:'LineString',coordinates:coords},properties:{}});
+  src.setData({type:'FeatureCollection',features:feats});
+}
+function updateGrids(){ drawCoordGrid(); drawRwyAxis(); }

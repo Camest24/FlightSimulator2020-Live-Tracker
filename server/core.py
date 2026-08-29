@@ -59,6 +59,7 @@ state = {
     "flight_start": None,
     "elapsed_min": 0,
     "weather": None,      # {"station","temp_c","wind_kt","wind_dir"}
+    "debug": False,       # true cuando el server corrio con --debug (avion de mentira, ver app.py)
 }
 route = []  # lista de [lat, lon, alt]
 MAX_ROUTE_POINTS = 6000   # tope del rastro; más arriba el navegador empieza a sufrir

@@ -109,7 +109,7 @@ function updateRoute(route){
 // ruta REAL entre los últimos puntos conocidos. Movimiento SIEMPRE hacia adelante, fluido
 // y sin retrocesos (rubber-banding). Único costo: ~1.2s de atraso, imperceptible.
 const buf=[];            // {lng,lat,hdg,t}
-const DELAY=700;         // colchón: ~3 muestras a 4 Hz. Absorbe el jitter del wifi sin colgarse
+const DELAY=700;         // colchón: ~7 muestras a 10 Hz. Absorbe el jitter del wifi sin colgarse
 // Cuánto puede pasar entre dos muestras del buffer antes de asumir que no es jitter de red
 // sino que el tab estuvo oculto/tapado (Chrome PAUSA por completo requestAnimationFrame en
 // tabs no visibles u ocluidos — algo normal acá: esta app suele vivir en una pestaña/monitor
@@ -123,7 +123,7 @@ const DELAY=700;         // colchón: ~3 muestras a 4 Hz. Absorbe el jitter del 
 // mientras el tab estuvo oculto.
 const GAP_MS=2000;
 let cur=null;            // posición renderizada (para seguir la cámara y para el trazo)
-let lastUi=0;            // separa el dibujado pesado (~1 Hz) de la lectura de posición (~4 Hz)
+let lastUi=0;            // separa el dibujado pesado (~1 Hz) de la lectura de posición (~10 Hz)
 function lerpAngle(a,b,t){ const d=((b-a+540)%360)-180; return a+d*t; }
 
 function updatePlane(s){
@@ -133,6 +133,7 @@ function updatePlane(s){
   // rotación y el modelo 3D se ve roto/"invertido".
   const hdg=finiteNum(s.heading,0);
   curAltFt=finiteNum(s.alt,0);
+  curOnGround=!!s.on_ground;
   const now=performance.now();
   // Ver comentario de GAP_MS: si pasó demasiado desde la última muestra, el tab estuvo
   // oculto y 'cur' quedó congelado. Vaciamos el buffer viejo así el próximo planeFrame()
@@ -160,7 +161,7 @@ let lastCenterAt=0;
 // mapa 60 veces por segundo — sobre todo con Terreno 3D, que además recalcula relieve y
 // vuelve a dibujar la capa custom de three.js en cada repintado — resultó ser demasiado
 // trabajo seguido: en una prueba real esto llegó a colgar la pestaña entera. La posición
-// real tampoco cambia más rápido que el propio telemetry_loop (4 lecturas/seg), así que no
+// real tampoco cambia más rápido que el propio telemetry_loop (10 lecturas/seg), así que no
 // hace falta re-centrar más seguido que eso para que se vea igual de fluido.
 const CENTER_MIN_MS=120;
 // Cámara de persecución (Terreno 3D + seguimiento): pitch fijo, alto, y el mapa gira para
@@ -235,7 +236,15 @@ function planeFrame(now){
     meMarker.setLngLat([cur.lng,cur.lat]);
     meMarker.setRotation(cur.hdg);
     const wantChase=followMode && planeModelOn;
-    if(followMode && now-lastCenterAt>=CENTER_MIN_MS && !map.isZooming() && !map.isRotating()){
+    if(towerMode2D && towerPoint2D && now-lastCenterAt>=CENTER_MIN_MS && !map.isZooming() && !map.isRotating()){
+      // Cámara de torre 2D: el CENTRO nunca se mueve de towerPoint2D (es fijo, como el
+      // mástil de una torre real) — lo único que cambia frame a frame es el BEARING, para
+      // que la torre siga "mirando" hacia donde está el avión ahora mismo. bearingTo ya
+      // existe en flight-progress.js (mismo scope global de siempre).
+      lastCenterAt=now;
+      map.setCenter(towerPoint2D);
+      map.setBearing(bearingTo(towerPoint2D[1], towerPoint2D[0], cur.lat, cur.lng));
+    } else if(followMode && now-lastCenterAt>=CENTER_MIN_MS && !map.isZooming() && !map.isRotating()){
       lastCenterAt=now;
       if(wantChase){
         // Fijamos el pitch acá mismo, sin animación (nada de tiltTo): una transición
