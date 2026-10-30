@@ -39,6 +39,22 @@ try:
 except Exception:
     LIVE_AIRWAYS_AVAILABLE = False
 
+# Tráfico IA (AIG/FSLTL/MSFS) por una tercera conexión SimConnect, también opcional. Ver
+# server/traffic.py para por qué no puede usar la conexión de telemetry_loop.
+try:
+    from server import traffic
+    TRAFFIC_AVAILABLE = True
+except Exception:
+    TRAFFIC_AVAILABLE = False
+
+# Fotos de JetPhotos para la tarjeta del tráfico (API no oficial de roowus corriendo en
+# local, ver server/jetphotos.py). Opcional: sin ella la tarjeta usa Wikimedia Commons.
+try:
+    from server import jetphotos
+    JETPHOTOS_AVAILABLE = True
+except Exception:
+    JETPHOTOS_AVAILABLE = False
+
 # La logica que no depende del estado mutable del simulador vive en server/ (ver
 # server/core.py para por que el estado mutable NO se movio). Se reimportan los nombres al
 # namespace de app.py porque demo_medellin.py y el resto del codigo los usan como
@@ -1494,7 +1510,90 @@ def _pos_actual():
         return state.get("lat"), state.get("lon")
 
 
+# ---------------------------------------------------------------------------
+# Cerrar la app cuando se cierra MSFS
+# ---------------------------------------------------------------------------
+MSFS_EXES = ('"flightsimulator.exe"', '"flightsimulator2024.exe"')
+
+
+def _msfs_abierto():
+    """True/False según haya un proceso de MSFS; None si no se pudo mirar (en ese caso
+    no se decide nada: mejor no cerrar que cerrar por un tasklist que falló)."""
+    try:
+        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True,
+                             timeout=10, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
+    except Exception:
+        return None
+    out = out.lower()
+    return any(n in out for n in MSFS_EXES)
+
+
+def _cerrar_con_msfs():
+    """Hilo: si MSFS estuvo abierto y se cerró, guarda el vuelo y termina el proceso.
+    Solo si llegó a verlo abierto: abrir la app sin el sim (para mirar el historial) no
+    la cierra. Pide 3 ausencias seguidas (~15 s) para no cortar por un tasklist raro.
+    Sale con código 0 a propósito: iniciar.bat solo deja la ventana en pausa si es != 0."""
+    visto = False
+    ausencias = 0
+    while True:
+        time.sleep(5)
+        abierto = _msfs_abierto()
+        if abierto is None:
+            continue
+        if abierto:
+            visto, ausencias = True, 0
+        elif visto:
+            ausencias += 1
+            if ausencias >= 3:
+                # flush: os._exit no vacía el buffer de salida y el aviso se perdía
+                print("MSFS se cerró: guardando el vuelo y cerrando MSFS Live.", flush=True)
+                save_current_flight()
+                if JETPHOTOS_AVAILABLE:
+                    jetphotos.detener_servicio()    # os._exit no corre atexit: si no, queda node vivo
+                os._exit(0)
+
+
+@app.route("/api/traffic")
+def api_traffic():
+    """Tráfico IA dentro de ?radius= NM del avión propio (el mismo radio de aeropuertos de
+    la UI). Se recorta a ~108 NM: es lo máximo que SimConnect deja pedir por tipo."""
+    if not TRAFFIC_AVAILABLE:
+        return jsonify({"disponible": False, "motivo": "módulo traffic no cargó", "aircraft": []})
+    try:
+        radio = float(request.args.get("radius", 60))
+    except ValueError:
+        radio = 60.0
+    lat, lon = _pos_actual()
+    out = dict(traffic.STATUS)
+    out["disponible"] = True
+    out["radio_max_nm"] = round(traffic.RADIO_MAX_NM)
+    out["aircraft"] = traffic.snapshot(lat, lon, radio)
+    return jsonify(out)
+
+
+@app.route("/api/jetphoto")
+def api_jetphoto():
+    """Foto de JetPhotos de ?reg=<matrícula>. {"foto": null} si no hay (o el servicio está
+    caído): el frontend sigue con Wikimedia Commons. Puede tardar varios segundos la
+    primera vez; después sale del caché."""
+    if not JETPHOTOS_AVAILABLE:
+        return jsonify({"foto": None})
+    return jsonify({"foto": jetphotos.buscar(request.args.get("reg", ""))})
+
+
+@app.route("/api/jetphoto_status")
+def api_jetphoto_status():
+    return jsonify(jetphotos.STATUS if JETPHOTOS_AVAILABLE else {"servicio": False})
+
+
 if __name__ == "__main__":
+    if os.environ.get("MSFS_LIVE_QUIET"):
+        # Arrancado en segundo plano por iniciar-con-msfs.pyw: el log va a un archivo y no
+        # tiene que anotar cada pedido HTTP, solo advertencias y errores. python-simconnect
+        # loguea "SIM def(...)" como error en cada reintento mientras MSFS no responde: ruido.
+        import logging
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
+        logging.getLogger("SimConnect").setLevel(logging.CRITICAL)
     if not DEBUG_MODE:
         load_current_flight()
     threading.Thread(target=(_debug_telemetry_loop if DEBUG_MODE else telemetry_loop), daemon=True).start()
@@ -1503,6 +1602,13 @@ if __name__ == "__main__":
         print("Modo DEBUG: avion estatico en " + DEBUG_AIRPORT_ICAO + ", sin tocar SimConnect.")
     elif LIVE_AIRWAYS_AVAILABLE:
         threading.Thread(target=live_airways.run, args=(AWY, _pos_actual, DATA_DIR), daemon=True).start()
+    if TRAFFIC_AVAILABLE:
+        threading.Thread(target=(traffic.run_debug if DEBUG_MODE else traffic.run),
+                         args=(_pos_actual,), daemon=True).start()
+    # JetPhotos ya no se levanta acá: arranca solo con la primera matrícula que no esté en
+    # caché (ver _asegurar_servicio en server/jetphotos.py).
+    if not DEBUG_MODE:
+        threading.Thread(target=_cerrar_con_msfs, daemon=True).start()
 
     # host="0.0.0.0" => accesible desde el celular/iPad en la misma red (no solo localhost)
     # threaded=True: sin esto, Werkzeug atiende un request HTTP a la vez, en serie — con

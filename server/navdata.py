@@ -122,6 +122,7 @@ def load_navdata():
                     airports.append({
                         "icao": ident,
                         "name": a.get("name") or ident,
+                        "city": a.get("municipality") or "",   # para la ruta del tráfico IA
                         "lat": lat,
                         "lon": lon,
                         "elev_ft": a.get("elevation_ft") or "",

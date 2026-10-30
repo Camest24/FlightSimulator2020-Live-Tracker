@@ -517,6 +517,78 @@
   .sw-toggle::after{ content:''; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.4); transition:transform .2s; }
   .sw-toggle.on{ background:#34c759; }
   .sw-toggle.on::after{ transform:translateX(18px); }
+  .toggle-opt .tr-count{ color:#94a3b8; font-size:12px; font-weight:400; margin-left:4px; }
+
+  /* ---- Etiqueta de cada avión de tráfico IA (estilo Flightradar: logo + callsign) ---- */
+  /* z-index: por encima de los pines de aeropuerto/VOR (también son marcadores HTML) */
+  .ac-label{ z-index:2; display:flex; flex-direction:column; align-items:center; gap:2px; padding:3px 7px 3px; border-radius:6px;
+    background:#fff; box-shadow:0 1px 5px rgba(0,0,0,0.35); cursor:pointer; white-space:nowrap; }
+  .ac-label img{ display:block; height:12px; max-width:76px; object-fit:contain; }
+  .ac-label i{ font-style:normal; font-size:9px; font-weight:800; letter-spacing:.03em; text-transform:uppercase;
+    color:hsl(var(--h) 65% 36%); }
+  .ac-label b{ font:700 10.5px/1.15 var(--mono); color:#1e293b; }
+  .ac-label.sel{ z-index:3; box-shadow:0 0 0 2px #ef4444, 0 1px 5px rgba(0,0,0,0.35); }
+
+  /* ---- Tarjeta del tráfico IA (static/js/traffic.js), versión compacta (~260px de alto) ----
+     z-index 990: por DEBAJO de #tools (1000), así el menú de capas se abre encima.
+     max-height: termina arriba del botón "P", la brújula y el zoom (abajo a la derecha, ~252px). */
+  #ac-card{ position:absolute; top:100px; right:26px; z-index:990; width:300px; max-height:calc(100vh - 370px);
+    overflow-y:auto; border-radius:18px; padding:12px; color:var(--text); }
+  #ac-card.hidden{ display:none; }
+  .acc-head{ display:flex; align-items:center; gap:10px; margin-bottom:11px; }
+  .acc-badge{ flex:none; width:36px; height:36px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    font:700 11px/1 var(--mono); letter-spacing:.03em; color:#fff;
+    background:linear-gradient(145deg, hsl(var(--h) 65% 46%), hsl(var(--h) 70% 30%)); box-shadow:inset 0 1px 0 rgba(255,255,255,0.25); }
+  .acc-titles{ flex:1; min-width:0; }
+  .acc-call{ font:700 17px/1.1 var(--mono); letter-spacing:.02em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .acc-sub{ font-size:11.5px; color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .acc-x{ flex:none; width:26px; height:26px; border-radius:50%; border:none; cursor:pointer; color:var(--text);
+    background:rgba(255,255,255,0.10); font-size:12px; line-height:26px; padding:0; }
+  .acc-x:hover{ background:rgba(255,255,255,0.18); }
+  /* Foto (Wikimedia Commons): crédito encima, con degradé para que se lea sobre cualquier foto */
+  .acc-photo{ position:relative; height:132px; border-radius:12px; overflow:hidden; margin-bottom:10px; background:rgba(0,0,0,0.25); }
+  .acc-photo.hidden{ display:none; }
+  .acc-photo img{ display:block; width:100%; height:100%; object-fit:cover; }
+  .acc-credit{ position:absolute; left:0; right:0; bottom:0; padding:14px 8px 4px; font-size:9.5px; color:rgba(255,255,255,0.9);
+    background:linear-gradient(transparent, rgba(0,0,0,0.7)); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; }
+  .acc-ref{ position:absolute; top:6px; left:6px; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:6px;
+    background:rgba(0,0,0,0.6); color:#fde68a; }
+  /* Fase del vuelo como etiqueta de color (ascenso verde, descenso naranja, tierra gris) */
+  .acc-fase{ flex:none; font-size:10px; font-weight:700; padding:3px 8px; border-radius:20px; white-space:nowrap;
+    background:rgba(59,130,246,0.25); color:#93c5fd; }
+  .acc-fase:empty{ display:none; }
+  .acc-fase[data-f="Ascenso"]{ background:rgba(74,222,128,0.18); color:var(--green); }
+  .acc-fase[data-f="Descenso"]{ background:rgba(251,146,60,0.2); color:var(--orange); }
+  .acc-fase[data-f="Estacionado"], .acc-fase[data-f="Rodando"], .acc-fase[data-f="En pista"]{ background:rgba(148,163,184,0.2); color:#cbd5e1; }
+  .acc-route{ display:flex; align-items:flex-start; gap:8px; margin-bottom:10px; }
+  .acc-apt{ flex:none; width:62px; display:flex; flex-direction:column; }
+  .acc-apt.r{ text-align:right; }
+  .acc-apt b{ font:700 15px/1.1 var(--mono); }
+  .acc-apt span{ font-size:10.5px; color:var(--text-dim); margin-top:1px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .acc-mid{ flex:1; min-width:0; padding-top:7px; }
+  .acc-bar{ position:relative; height:3px; border-radius:2px; background:rgba(255,255,255,0.18); }
+  .acc-fill{ position:absolute; left:0; top:0; bottom:0; width:0; border-radius:2px; background:#fbbf24; }
+  .acc-plane{ position:absolute; top:50%; left:0; transform:translate(-50%,-50%) rotate(90deg); line-height:0; }
+  .acc-phase{ font-size:10.5px; color:var(--text-dim); text-align:center; margin-top:9px; white-space:nowrap; }
+  .acc-noplan{ font-size:11px; color:var(--text-dim); margin:-3px 0 9px; }
+  /* 3 columnas: Altitud · Velocidad · V/S, y abajo Rumbo + Distancia (doble) */
+  .acc-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .acc-grid > div{ min-width:0; background:rgba(255,255,255,0.07); border-radius:10px; padding:6px 8px; }
+  .acc-grid > div.wide{ grid-column:span 2; }
+  .acc-grid span{ display:block; font-size:10px; color:var(--text-dim); white-space:nowrap; }
+  .acc-grid b{ display:block; font:600 13px/1.25 var(--mono); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .acc-grid small{ font-size:10px; color:var(--text-dim); }
+  .acc-foot{ display:flex; align-items:center; gap:8px; margin-top:9px; padding:0 2px;
+    font:500 10.5px/1.3 var(--mono); color:var(--text-dim); }
+  .acc-foot > span{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .acc-jp{ flex:none; font:600 10.5px/1 system-ui,sans-serif; color:#7dd3fc; text-decoration:none;
+    padding:4px 7px; border-radius:7px; background:rgba(125,211,252,0.12); }
+  .acc-jp:hover{ background:rgba(125,211,252,0.22); }
+  /* Celular: hoja inferior a lo ancho */
+  @media (max-width:700px){
+    /* acá sí va por encima de todo: en pantalla angosta el panel de datos ocupa el ancho */
+    #ac-card{ top:auto; bottom:12px; left:12px; right:12px; width:auto; max-height:62vh; z-index:1500; }
+  }
   .radius-row{ display:flex; align-items:center; gap:8px; padding:4px 10px 8px 56px; }
   .radius-row .rr-label{ color:var(--text-dim); font-size:13px; font-weight:500; flex:1; }
   .radius-row .rr-btn{ width:26px; height:26px; border-radius:8px; border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-size:16px; font-weight:600; display:flex; align-items:center; justify-content:center; }
@@ -528,6 +600,12 @@
     border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
   #compass:hover{ filter:brightness(1.15); }
   #compass-rose{ transition:transform .12s linear; }
+
+  /* Botón "P" del tráfico IA: encima de la brújula (132 + 54 de la brújula + 12 de hueco) */
+  #btn-parked{ position:absolute; bottom:198px; right:26px; z-index:1000; width:54px; height:54px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; color:#fff; padding:0; transition:background .15s; }
+  #btn-parked:hover{ filter:brightness(1.15); }
+  #btn-parked.on{ background:var(--amber); border-color:var(--amber); color:#1e293b; }
 
   #zoom{ position:absolute; bottom:26px; right:26px; z-index:1000; display:flex; flex-direction:column; gap:6px; }
   #zoom button{ width:54px; height:48px; border:1px solid var(--bar-brd); border-radius:18px; cursor:pointer;

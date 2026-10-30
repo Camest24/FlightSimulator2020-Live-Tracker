@@ -140,6 +140,9 @@
          Este slot ahora es "Grids": retícula de coordenadas + eje de pista extendido para
          el destino elegido, pensado para planear rutas a mano sin perder la referencia. -->
     <div class="toggle-opt"><span class="tico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.8"><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></span><span class="name">Grids</span><span class="sw-toggle" id="tg-grids"></span></div>
+    <!-- Tráfico IA (AIG/FSLTL/MSFS, ver static/js/traffic.js): usa el mismo radio de abajo,
+         por eso va pegado a la fila del radio. -->
+    <div class="toggle-opt"><span class="tico"><svg width="18" height="18" viewBox="0 0 24 24" fill="#facc15"><path d="M12 2c.8 0 1.4.7 1.4 1.6V9l7.6 4.4v2l-7.6-2.2v4.6l2.2 1.7V21L12 20l-3.6 1v-1.5l2.2-1.7v-4.6L3 15.4v-2L10.6 9V3.6C10.6 2.7 11.2 2 12 2z"/></svg></span><span class="name">Tráfico IA <span class="tr-count" id="traffic-count"></span></span><span class="sw-toggle on" id="tg-traffic"></span></div>
     <div class="radius-row"><span class="rr-label">Radio</span><button class="rr-btn" id="rad-minus">−</button><span id="rad-val">60 NM</span><button class="rr-btn" id="rad-plus">+</button></div>
     <div class="divider"></div>
     <div class="toggle-opt"><span class="tico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b6f47" stroke-width="1.8" stroke-linejoin="round"><path d="M3 19l6-10 4 6 2-3 6 7z"/></svg></span><span class="name">Terreno 3D</span><span class="sw-toggle" id="tg-terrain3d"></span></div>
@@ -193,6 +196,10 @@
   </svg>
 </div>
 <div id="zoom"><button id="zin">+</button><button id="zout">−</button></div>
+<!-- Tráfico IA: mostrar/ocultar los estacionados apagados (ver static/js/traffic.js) -->
+<button id="btn-parked" class="glass bar" title="Mostrar aviones estacionados y apagados">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M10 17V7h3.5a3 3 0 0 1 0 6H10"/></svg>
+</button>
 
 
 
@@ -307,6 +314,8 @@
 
 <div id="eta-toast" class="glass hidden"><span id="eta-text"></span></div>
 
+<!-- Tarjeta del avión de tráfico IA seleccionado: la arma static/js/traffic.js -->
+<div id="ac-card" class="glass hidden"></div>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <!-- three.js clásico (no-módulo, para encajar con el resto del archivo) para el modelo 3D
@@ -325,5 +334,6 @@
 <script src="/static/js/telemetry.js"></script>
 <script src="/static/js/graph-panel.js"></script>
 <script src="/static/js/tools-ui.js"></script>
+<script src="/static/js/traffic.js"></script>
 </body>
 </html>

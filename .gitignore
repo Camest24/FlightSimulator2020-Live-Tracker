@@ -12,6 +12,9 @@ data/simbridge_path.txt
 data/simbridge_exe.txt
 data/simconnect_dll_path.txt
 data/cesium_ion_token.txt
+data/msfs-live.log
+data/jetphotos_cache.json
+data/jetphotos_cache.json.tmp
 
 # Python
 __pycache__/
@@ -28,3 +31,7 @@ Thumbs.db
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
+
+# API de JetPhotos (Node): dependencias y cache local de wrangler
+tools/jetphotos-api/node_modules/
+tools/jetphotos-api/.wrangler/
