@@ -142,10 +142,37 @@ def _safe_get(aq, name):
     la web se puede colar entre dos lecturas en vez de esperar a que termine el ciclo.
     """
     try:
-        with sim_lock:
-            return aq.get(name)
+        cada = FRECUENCIA_S.get(name)
+        if cada is None:
+            with sim_lock:
+                return aq.get(name)
+        return _leer_sin_esperar(aq, name, cada)
     except Exception:
         return None
+
+
+def _leer_sin_esperar(aq, name, cada):
+    """Variables lentas (ver SIMVARS_CADA_1S/10S): se manda el pedido y NO se espera la
+    respuesta; se devuelve el último valor conocido. La respuesta la deja el hilo de dispatch
+    de la librería en Request.outData y se toma en la vuelta siguiente. Darles solo un caché
+    más largo (Request.time) NO alcanzaba: al vencer se volvían a esperar una por una, y como
+    vencían todas juntas la vuelta seguía tardando ~1 s.
+
+    Usa partes internas de python-simconnect (find, _deff_test, request_data, outData): si se
+    actualiza la librería, revisar que sigan igual. El último valor se guarda EN el Request,
+    así al reconectar (aq nuevo) arranca limpio solo."""
+    r = aq.find(name)
+    if r is None:
+        return None
+    if r.outData is not None:              # request_data() lo pone en None al pedir: se guarda antes
+        r.ultimo_valor = r.outData
+    ahora = time.time()
+    if ahora - getattr(r, "pedido_t", 0.0) >= cada:
+        r.pedido_t = ahora
+        with sim_lock:
+            if r._deff_test():
+                r.sm.request_data(r)
+    return getattr(r, "ultimo_valor", None)
 
 
 
@@ -521,6 +548,40 @@ def _debug_telemetry_loop():
         time.sleep(1)
 
 
+# ---------------------------------------------------------------------------
+# Frecuencia de lectura de cada SimVar
+# ---------------------------------------------------------------------------
+# python-simconnect lee UNA variable por pedido y se queda esperando la respuesta del sim
+# (~1 frame, ver get_data en su SimConnect.py). Con ~45 variables por vuelta, cada vuelta
+# tardaba ~1 s (la posición del avión se actualizaba ~1 vez por segundo, no 10) aunque casi
+# todo cambia poco y el panel se redibuja 1 vez por segundo. Ahora solo lo que mueve el
+# avión en el mapa/3D se pide y se espera en cada vuelta; las de estas listas se piden cada
+# 1/3/10 s SIN esperar la respuesta (ver _leer_sin_esperar). Medido con un SimConnect falso
+# a 40 FPS: la posición pasa de ~0,8 a ~2,3 actualizaciones por segundo, con menos pedidos
+# al sim (de ~37 a ~30 por segundo).
+# 1 s: lo que el panel muestra (se redibuja 1 vez/s) o lo que usa la lógica de vuelo
+# (fin de vuelo, salto imposible con sim rate, tiempo de vuelo con el reloj del sim) y las
+# luces, para que el botón de la app responda rápido.
+SIMVARS_CADA_1S = (
+    "SIM_ON_GROUND", "GEAR_CENTER_POSITION", "AIRSPEED_INDICATED", "AIRSPEED_MACH",
+    "SIMULATION_RATE", "ABSOLUTE_TIME",
+    "LIGHT_LANDING", "LIGHT_BEACON", "LIGHT_STROBE", "LIGHT_NAV", "LIGHT_TAXI",
+)
+# 3 s: cambia despacio (combustible, hora local para la ETA y el día/noche, tramo del GPS)
+SIMVARS_CADA_3S = (
+    "LOCAL_TIME", "FUEL_TOTAL_QUANTITY",
+    "GPS_IS_ACTIVE_FLIGHT_PLAN", "GPS_WP_DISTANCE", "GPS_FLIGHT_PLAN_WP_INDEX",
+    "GPS_FLIGHT_PLAN_WP_COUNT", "GPS_WP_NEXT_LAT", "GPS_WP_NEXT_LON", "GPS_WP_PREV_LAT", "GPS_WP_PREV_LON",
+)
+# 10 s: no cambia en vuelo
+SIMVARS_CADA_10S = ("ENGINE_TYPE", "NUMBER_OF_ENGINES", "MAGVAR", "FUEL_TOTAL_CAPACITY")
+FRECUENCIA_S = dict([(n, 1) for n in SIMVARS_CADA_1S] + [(n, 3) for n in SIMVARS_CADA_3S]
+                    + [(n, 10) for n in SIMVARS_CADA_10S])
+FUEL_FLOW_CADA = 10   # s. ENG_FUEL_FLOW_GPH:n comparte UN Request para todos los motores y la
+                      # librería lo redefine (ClearDataDefinition + otro pedido) al cambiar de n,
+                      # así que no puede ir "sin esperar": se lee esperando, pero cada 10 s.
+
+
 def telemetry_loop():
     global last_save, last_weather_fetch, sim_aq, sim_events, sim_raw, last_pos_t
     global prev_sim_clock, prev_wall_clock, prev_time_source, last_known_sim_rate
@@ -528,6 +589,7 @@ def telemetry_loop():
     aq = None
     consecutive_errors = 0
     ERROR_THRESHOLD = 5   # solo damos por "desconectado" tras varios fallos seguidos
+    fuel_flow, fuel_flow_t = 0.0, 0.0
 
     if not SIMCONNECT_AVAILABLE:
         # Sin librería SimConnect: el server sirve la UI igual, pero sin telemetría.
@@ -540,7 +602,8 @@ def telemetry_loop():
         try:
             if sm is None:
                 sm = SimConnect()
-                aq = AircraftRequests(sm, _time=100)   # caché más fresco para 4 Hz
+                aq = AircraftRequests(sm, _time=100)   # caché de lo que se pide en cada vuelta;
+                                                       # las lentas van aparte (FRECUENCIA_S)
                 sim_aq = aq
                 sim_raw = sm   # objeto crudo, lo necesita camera_jump_to() (ver más abajo)
                 try:
@@ -586,9 +649,10 @@ def telemetry_loop():
             on_ground = _safe_get(aq, "SIM_ON_GROUND")
             gear_pct = _safe_get(aq, "GEAR_CENTER_POSITION")
 
-            # Estado del avión (sistemas)
-            flaps_pct = _safe_get(aq, "FLAPS_HANDLE_PERCENT")
-            flaps_index = _safe_get(aq, "FLAPS_HANDLE_INDEX")
+            # Estado del avión (sistemas). Flaps, spoilers, freno de parqueo y piloto automático
+            # ya NO se leen: el panel quedó solo con las luces (ver renderStatus en tools-ui.js)
+            # y eran 11 pedidos al sim por vuelta para nada. Si vuelven a la UI, leerlos acá
+            # (con frecuencia de 1 s, ver SIMVARS_CADA_1S).
             eng_type = _safe_get(aq, "ENGINE_TYPE")       # para elegir el ícono del avión
             eng_count = _safe_get(aq, "NUMBER_OF_ENGINES")
             # El modelo del avión sirve para elegir el perfil de descenso (un A320 y un
@@ -641,8 +705,6 @@ def telemetry_loop():
                     }
             except Exception:
                 fplan = None
-            spoilers_pct = _safe_get(aq, "SPOILERS_HANDLE_POSITION")
-            parking_brake = _safe_get(aq, "BRAKE_PARKING_POSITION")
             lights = {
                 "landing": bool(_safe_get(aq, "LIGHT_LANDING")),
                 "beacon": bool(_safe_get(aq, "LIGHT_BEACON")),
@@ -650,27 +712,20 @@ def telemetry_loop():
                 "nav": bool(_safe_get(aq, "LIGHT_NAV")),
                 "taxi": bool(_safe_get(aq, "LIGHT_TAXI")),
             }
-            ap_hdg = _safe_get(aq, "AUTOPILOT_HEADING_LOCK_DIR")
-            if ap_hdg is not None:
-                ap_hdg = math.degrees(ap_hdg) % 360
-            ap = {
-                "master": bool(_safe_get(aq, "AUTOPILOT_MASTER")),
-                "hdg_lock": bool(_safe_get(aq, "AUTOPILOT_HEADING_LOCK")),
-                "alt_lock": bool(_safe_get(aq, "AUTOPILOT_ALTITUDE_LOCK")),
-                "spd_lock": bool(_safe_get(aq, "AUTOPILOT_AIRSPEED_HOLD")),
-                "hdg": ap_hdg,
-                "alt": _safe_get(aq, "AUTOPILOT_ALTITUDE_LOCK_VAR"),
-                "spd": _safe_get(aq, "AUTOPILOT_AIRSPEED_HOLD_VAR"),
-            }
 
             # Combustible + autonomía (cada campo protegido por si el avión no lo expone)
             fuel_gal = _safe_get(aq, "FUEL_TOTAL_QUANTITY")
             fuel_cap = _safe_get(aq, "FUEL_TOTAL_CAPACITY")
-            fuel_flow = 0.0
-            for i in (1, 2, 3, 4):
-                f = _safe_get(aq, "ENG_FUEL_FLOW_GPH:" + str(i))
-                if f:
-                    fuel_flow += f
+            if time.time() - fuel_flow_t > FUEL_FLOW_CADA:
+                # Solo los motores que tiene el avión (antes eran siempre 4, y cada cambio
+                # de índice redefine la variable en la librería).
+                fuel_flow_t = time.time()
+                n_motores = int(eng_count) if eng_count else 4
+                fuel_flow = 0.0
+                for i in range(1, max(1, min(4, n_motores)) + 1):
+                    f = _safe_get(aq, "ENG_FUEL_FLOW_GPH:" + str(i))
+                    if f:
+                        fuel_flow += f
             endurance_min = None
             if fuel_gal is not None and fuel_flow and fuel_flow > 0.1:
                 endurance_min = (fuel_gal / fuel_flow) * 60.0
@@ -687,8 +742,6 @@ def telemetry_loop():
                 state["vs"] = vs
                 state["on_ground"] = bool(on_ground) if on_ground is not None else None
                 state["gear_pct"] = gear_pct
-                state["flaps_pct"] = flaps_pct
-                state["flaps_index"] = int(flaps_index) if flaps_index is not None else None
                 state["eng_type"] = int(eng_type) if eng_type is not None else None
                 state["eng_count"] = int(eng_count) if eng_count is not None else None
                 state["mach"] = mach
@@ -701,10 +754,7 @@ def telemetry_loop():
                 state["reloj_sim"] = abs_time if abs_time is not None else local_time
                 state["magvar"] = magvar
                 state["fplan"] = fplan
-                state["spoilers_pct"] = spoilers_pct
-                state["parking_brake"] = bool(parking_brake) if parking_brake is not None else None
                 state["lights"] = lights
-                state["ap"] = ap
                 state["fuel_gal"] = fuel_gal
                 state["fuel_capacity"] = fuel_cap
                 state["fuel_flow_gph"] = fuel_flow if fuel_flow > 0 else None
@@ -866,10 +916,10 @@ def telemetry_loop():
                 time.sleep(1)
             continue
 
-        time.sleep(0.1)   # 10 lecturas por segundo (subido de 4 — ver AircraftRequests(_time=100)
-                          # más arriba: 100ms de caché interna en SimConnect, así que 10Hz es
-                          # exactamente el techo real — pedir más rápido no traería datos más
-                          # frescos, solo trabajo de más).
+        time.sleep(0.1)   # pausa entre vueltas (ver AircraftRequests(_time=100) más arriba: 100ms
+                          # de caché, pedir más rápido no traería datos más frescos). OJO: la
+                          # vuelta en sí tarda además ~1 frame del sim por cada variable que
+                          # se espera, por eso las lentas van sin esperar (FRECUENCIA_S).
 
 
 
