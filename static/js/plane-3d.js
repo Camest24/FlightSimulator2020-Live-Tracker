@@ -265,38 +265,9 @@ function update3DTrail(route,drawTo){
   map.triggerRepaint();
 }
 
-const labelIds=labelLayers.map(l=>l.id);
-function setBase(name){ const v=(id,on)=>map.setLayoutProperty(id,'visibility',on?'visible':'none');
-  v('sat',name==='satlabels'||name==='satellite'); v('street',name==='street'); v('dark',name==='dark');
-  labelIds.forEach(id=>v(id,name==='satlabels')); }
-document.querySelectorAll('.layer-opt').forEach(o=>o.addEventListener('click',()=>{
-  document.querySelectorAll('.layer-opt').forEach(x=>x.classList.remove('sel')); o.classList.add('sel'); setBase(o.dataset.layer); }));
 document.getElementById('btn-layers').addEventListener('click',()=>{ document.getElementById('layers').classList.toggle('hidden'); document.getElementById('btn-layers').classList.toggle('active'); });
-// Los botones de zoom no deben soltar el seguimiento: si estás siguiendo al avión,
-// hacemos el zoom centrado en él en vez de dejar que se corra de la pantalla.
-//
-// En modo Terreno 3D el mapa de MapLibre está oculto (display:none) — zoomear ahí no
-// tiene ningún efecto visible, incómodo justo con el único botón de zoom que hay a mano.
-// planeModelOn es la misma bandera que ya usa el resto del código para saber si el modo
-// 3D está activo (se prende/apaga junto con window.cesium3D.setActive, ver
-// flightplan.js) — si está prendida, redirigimos el click a la cámara de Cesium en vez
-// del mapa 2D.
-function zoomBoton(delta){
-  if(planeModelOn && window.cesium3D){ window.cesium3D.adjustZoom(delta); return; }
-  if(followMode && meMarker){ const g=meMarker.getLngLat(); map.easeTo({zoom:map.getZoom()+delta, center:centroSeguir(g.lng,g.lat), duration:280}); }
-  else if(delta>0) map.zoomIn(); else map.zoomOut();
-}
-document.getElementById('zin').onclick=()=>zoomBoton(1);
-document.getElementById('zout').onclick=()=>zoomBoton(-1);
-
-// Brújula (abajo a la derecha): gira con el mapa y al tocarla vuelve al norte
-document.getElementById('compass').onclick=()=>map.easeTo({bearing:0,duration:400});
-function syncCompass(){
-  const c=document.getElementById('compass-rose');
-  if(c) c.style.transform='rotate('+(-map.getBearing())+'deg)';
-}
-map.on('rotate',syncCompass);
-syncCompass();
+// (Acá estaban los botones de zoom, que hacían zoom sin soltar el seguimiento, y la
+// brújula que volvía al norte. Se sacaron el 2026-11-21: en el iPad se hace con los dedos.)
 
 // Vista 2D / 3D (inclinación del mapa). Animamos el pitch nosotros mismos, cuadro a
 // cuadro con setPitch instantáneo, para que el recentrado del seguimiento no la cancele.
@@ -315,7 +286,16 @@ document.getElementById('btn-3d').onclick=()=>{
   const b=document.getElementById('btn-3d');
   b.textContent = to3d?'3D':'2D';   // muestra el modo en el que quedás
   b.classList.toggle('active', to3d);
+  try{ localStorage.setItem('vista3d', to3d?'1':'0'); }catch(e){}
 };
+// La vista 2D/3D se recuerda entre sesiones (el mapa nace inclinado a 60°, ver map-setup.js)
+try{
+  if(localStorage.getItem('vista3d')==='0'){
+    map.setPitch(0);
+    const b=document.getElementById('btn-3d');
+    b.textContent='2D'; b.classList.remove('active');
+  }
+}catch(e){}
 
 
 function dest(lat,lon,brg,d){const R=6378137,b=brg*Math.PI/180,dd=d/R,la1=lat*Math.PI/180,lo1=lon*Math.PI/180;

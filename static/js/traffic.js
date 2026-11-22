@@ -2,7 +2,9 @@
 // Usa el mismo radio que los aeropuertos (aptRadius): el botón de radio decide también
 // cuánto tráfico se ve. El backend lee el sim cada 2 s; entre lectura y lectura cada avión
 // se extrapola con su rumbo y velocidad (4 Hz) para que no avance a saltos de ~250 m.
-flags.traffic=true;
+// Prendido o apagado se recuerda entre sesiones: hay días que se vuela con tráfico y días que no.
+flags.traffic=(()=>{ try{ return localStorage.getItem('traffic.on')!=='0'; }catch(e){ return true; } })();
+document.getElementById('tg-traffic').classList.toggle('on',flags.traffic);
 let trafficData=[], trafficT=0, trafficSel=null, trafficMaxNM=108;
 // Estacionados y apagados (a.activo===false, ver _publicar en server/traffic.py): ocultos por
 // defecto, como en un radar real. El botón "P" los muestra; la elección se recuerda.
@@ -374,12 +376,14 @@ function updateTrafficCard(){
 }
 
 bindToggle(document.getElementById('tg-traffic'),'traffic',(on)=>{
+  try{ localStorage.setItem('traffic.on',on?'1':'0'); }catch(e){}
   if(!on){ closeTrafficCard(); trafficData=[]; document.getElementById('traffic-count').textContent=''; }
   else fetchTraffic();
   renderTraffic();
 });
 
-// Botón "P" (junto a la brújula): mostrar u ocultar los estacionados apagados
+// "Mostrar parqueados" (en el menú del engranaje; antes era el botón "P" junto a la
+// brújula): mostrar u ocultar los estacionados apagados
 (()=>{
   const b=document.getElementById('btn-parked'); if(!b) return;
   b.classList.toggle('on',flags.parked);

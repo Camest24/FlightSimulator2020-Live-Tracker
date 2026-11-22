@@ -24,16 +24,17 @@ const rlayer=(id,vis)=>({id,type:'raster',source:id,layout:{visibility:vis?'visi
 // una capa de sombreado para que el relieve se note también con el mapa plano.
 const hillshadeLayer={id:'hillshade-3d',type:'hillshade',source:'hillshadeSource',
   layout:{visibility:'none'},paint:{'hillshade-shadow-color':'#473b24'}};
+// Solo queda "Satélite con nombres": los mapas de calles y oscuro (Carto) empezaron a pedir
+// API key ("API key required") y el satélite pelado nadie lo usaba, así que se sacaron con
+// su selector (2026-11-21).
 const style={version:8,glyphs:'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
   sources:{
     sat:{type:'raster',tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19},
-    street:{type:'raster',tiles:['https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'],tileSize:256,maxzoom:19},
-    dark:{type:'raster',tiles:['https://basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png'],tileSize:256,maxzoom:19},
     omt:{type:'vector',url:'https://tiles.openfreemap.org/planet'},
     terrainSource:{type:'raster-dem',url:'https://tiles.mapterhorn.com/tilejson.json'},
     hillshadeSource:{type:'raster-dem',url:'https://tiles.mapterhorn.com/tilejson.json'},
   },
-  layers:[rlayer('sat',true),rlayer('street',false),rlayer('dark',false),hillshadeLayer,...labelLayers],
+  layers:[rlayer('sat',true),hillshadeLayer,...labelLayers],
   sky:{},
 };
 

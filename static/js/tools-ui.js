@@ -1,64 +1,50 @@
-/* tools-ui.js — Paneles y utilidades sueltas: company route, buscador, estado del avion, averias,
-   historial, wake lock y tamano de los paneles.
+/* tools-ui.js — Paneles y utilidades sueltas: luces y hora (engranaje), buscador, estado del avion,
+   historial, resumen de fin de vuelo, wake lock, dock de abajo y barra movible.
 
    Extraido tal cual del unico bloque <script> que vivia dentro de templates/index.html.
    Se carga como <script src> clasico (NO type=module): todos estos archivos comparten el
    mismo scope global y DEPENDEN de cargarse en el orden en que aparecen en el HTML, que es
    el mismo orden en que este codigo estaba escrito. No reordenar. */
 
-// ---- Exportar la ruta como company route (para cargarla desde el MCDU) ----
-document.getElementById('rc-mcdu').onclick=function(){
-  if(!routeTarget){ return; }
-  if(routeTarget.icao==='PUNTO'){ showToast('El destino tiene que ser un aeropuerto'); return; }
-  const org=findOriginAirport();
-  if(!org){ showToast('No pude identificar el aeropuerto de salida'); return; }
-  // Solo viajan los puntos CON nombre. Un punto suelto del mapa no tiene identificador,
-  // y el MCDU no puede cargar algo que no existe en su base de navegación.
-  const conNombre=routeWaypoints.filter(w=>w.name);
-  const sinNombre=routeWaypoints.length-conNombre.length;
-  const btn=this; btn.disabled=true; btn.textContent='Guardando…';
-  fetch('/api/coroute',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({origin:org.icao, destination:routeTarget.icao,
-      origin_lat:org.lat, origin_lon:org.lon,
-      dest_lat:routeTarget.lat, dest_lon:routeTarget.lon,
-      waypoints:conNombre.map(w=>({id:w.name, name:w.name, lat:w.lat, lon:w.lon}))})})
-    .then(r=>r.json()).then(d=>{
-      if(!d.ok){
-        const msg={no_simbridge:'No encontré la carpeta de SimBridge',
-                   ruta_muy_corta:'La ruta necesita al menos un punto: usá "Generar ruta"',
-                   faltan_aeropuertos:'Origen y destino tienen que ser aeropuertos'}[d.reason];
-        showToast(msg || 'No pude guardar la ruta');
-        return;
-      }
-      const fuera=[].concat(d.skipped||[]);
-      const sb=d.simbridge||{};
-      // El archivo puede quedar perfecto y el MCDU dar error igual, simplemente porque
-      // SimBridge está cerrado: el avión no lee el archivo, se lo pide al servidor de
-      // SimBridge. Antes esto no se veía por ningún lado y parecía que fallaba la app.
-      if(!sb.vivo){
-        // Sin SimBridge abierto el MCDU no puede leer la ruta. En vez de mandarte a
-        // buscarlo al menú de inicio, lo intentamos abrir nosotros.
-        showToast('Ruta guardada como "'+d.name+'" · abriendo SimBridge…');
-        fetch('/api/simbridge_start',{method:'POST'}).then(r=>r.json()).then(function(a){
-          if(a.ok) showToast('SimBridge abierto · ya podés escribir "'+d.name+'" en CO RTE');
-          else if(a.reason==='no_encontrado')
-            showToast('No encontré SimBridge instalado · abrilo a mano (FlyByWire SimBridge) '
-              +'y volvé a tocar MCDU');
-          else
-            showToast('No pude abrir SimBridge · abrilo a mano y volvé a tocar MCDU');
-        }).catch(function(){ showToast('No pude abrir SimBridge · abrilo a mano'); });
-      } else if(sb.ruta_visible===false){
-        showToast('Guardada como "'+d.name+'" pero SimBridge no la pudo leer · '
-          +'probá con menos puntos intermedios');
-      } else {
-        showToast('Guardada como "'+d.name+'" · '+d.fixes+' puntos · escribila en CO RTE'
-          +(sinNombre?(' · '+sinNombre+' sin nombre quedaron fuera'):'')
-          +(fuera.length?(' · el FMS no reconoce: '+fuera.join(', ')):''));
-      }
-    })
-    .catch(()=>showToast('Error al guardar la ruta'))
-    .finally(()=>{ btn.disabled=false; btn.textContent='→ MCDU'; });
-};
+// ---- Engranaje de la barra: luces y hora del simulador ----
+// Abre un menú con luces y hora (sus modales de siempre), "Mostrar parqueados" (un
+// interruptor del tráfico IA) y, con ruta, añadir puntos y eliminar la ruta. Se cierra al
+// abrir luces u hora, al empezar a añadir puntos o al tocar afuera; con parqueados queda
+// abierto para que se vea si quedó prendido. No convive con el de capas.
+// Eliminar ruta pide dos toques: el primero lo pone rojo ("¿Seguro? Tocá de nuevo") y el
+// segundo la borra. Si no confirmás en 4 s vuelve a la normalidad.
+(function(){
+  const btn=document.getElementById('btn-ajustes'), menu=document.getElementById('ajustes');
+  const capas=document.getElementById('layers'), btnCapas=document.getElementById('btn-layers');
+  if(!btn||!menu) return;
+  const borrar=document.getElementById('btn-borrar-ruta');
+  let tBorrar=null;
+  function borrarNormal(){ clearTimeout(tBorrar); tBorrar=null; if(!borrar) return;
+    borrar.classList.remove('confirmar'); borrar.querySelector('span').textContent='Eliminar ruta'; }
+  function abrir(on){
+    menu.classList.toggle('hidden',!on); btn.classList.toggle('active',on);
+    if(!on){ borrarNormal(); return; }
+    menu.querySelectorAll('.aj-ruta').forEach(b=>b.disabled=!routeTarget);
+  }
+  if(borrar) borrar.addEventListener('click',()=>{
+    if(!routeTarget) return;
+    if(borrar.classList.contains('confirmar')){ borrarNormal(); clearRoute(); abrir(false); showToast('Ruta eliminada'); return; }
+    borrar.classList.add('confirmar'); borrar.querySelector('span').textContent='¿Seguro? Tocá de nuevo';
+    tBorrar=setTimeout(borrarNormal, 4000);
+  });
+  btn.addEventListener('click',()=>{
+    const on=menu.classList.contains('hidden');
+    if(on && capas && !capas.classList.contains('hidden')){ capas.classList.add('hidden'); btnCapas.classList.remove('active'); }
+    abrir(on);
+  });
+  if(btnCapas) btnCapas.addEventListener('click',()=>abrir(false));
+  // En captura: el botón de luces corta la propagación del click
+  menu.addEventListener('click',e=>{ const b=e.target.closest('.aj-btn');
+    if(b && !b.disabled && b.id!=='btn-parked' && b.id!=='btn-borrar-ruta') abrir(false); }, true);
+  document.addEventListener('pointerdown',e=>{
+    if(!menu.classList.contains('hidden') && !menu.contains(e.target) && !btn.contains(e.target)) abrir(false);
+  }, true);
+})();
 
 // ---- Buscador de aeropuertos del mundo ----
 let searchTimer=null;
@@ -116,129 +102,10 @@ function renderStatus(s){
   const on=!!(L.landing||L.taxi||L.beacon||L.strobe||L.nav);
   const b=document.getElementById('btn-status'); if(b) b.classList.toggle('on',on);
 }
-document.getElementById('off-x').oninput=(e)=>setOffsetX(parseInt(e.target.value,10));
-document.getElementById('off-reset').onclick=()=>offsetAuto();
 document.getElementById('btn-status').onclick=(e)=>{ e.stopPropagation(); renderStatus(lastState);
-  pintarOffset();
   document.getElementById('status-modal').classList.remove('hidden'); };
 document.getElementById('st-close').onclick=()=>document.getElementById('status-modal').classList.add('hidden');
 document.getElementById('status-modal').addEventListener('click',(e)=>{ if(e.target.id==='status-modal') e.currentTarget.classList.add('hidden'); });
-
-// ---- Averías ----
-// Cada una es un evento estándar de SimConnect. Se disparan por el mismo canal que ya
-// usan el tren, los flaps y las luces.
-const AVERIAS=[
-  ['TOGGLE_ENGINE1_FAILURE','Motor 1'],
-  ['TOGGLE_ENGINE2_FAILURE','Motor 2'],
-  ['TOGGLE_ENGINE3_FAILURE','Motor 3'],
-  ['TOGGLE_ENGINE4_FAILURE','Motor 4'],
-  ['TOGGLE_ELECTRICAL_FAILURE','Sistema eléctrico'],
-  ['TOGGLE_HYDRAULIC_FAILURE','Hidráulico'],
-  ['TOGGLE_VACUUM_FAILURE','Vacío'],
-  ['TOGGLE_PITOT_BLOCKAGE','Tubo pitot bloqueado'],
-  ['TOGGLE_STATIC_PORT_BLOCKAGE','Toma estática bloqueada'],
-  ['TOGGLE_TOTAL_BRAKE_FAILURE','Frenos (ambos)'],
-  ['TOGGLE_LEFT_BRAKE_FAILURE','Freno izquierdo'],
-  ['TOGGLE_RIGHT_BRAKE_FAILURE','Freno derecho'],
-];
-// Todos son eventos TOGGLE: el mismo evento rompe y repara. Por eso llevamos la cuenta
-// de cuáles están rotas ahora mismo (failActivas) y así podemos ofrecer "reparar".
-let failMin=0, failCola=[], failSeq=0;
-const failActivas=new Set();
-const failNombre=Object.fromEntries(AVERIAS);
-
-function failMinutos(){
-  const libre=parseFloat(document.getElementById('fail-min').value);
-  return (!isNaN(libre) && libre>=0) ? libre : failMin;
-}
-
-// Dispara el evento y avisa de verdad si el simulador no lo aceptó, en vez de fallar
-// en silencio como hacía antes.
-function mandarAveria(ev, nombre, romper){
-  return cmd(ev).then(d=>{
-    if(!d.ok){
-      showToast('No se pudo: '+nombre+(d.error?(' ('+d.error+')'):''));
-      return false;
-    }
-    if(romper) failActivas.add(ev); else failActivas.delete(ev);
-    pintarAverias();
-    showToast(romper ? ('¡Avería! '+nombre) : ('Reparado: '+nombre));
-    return true;
-  });
-}
-
-function pintarCola(){
-  const box=document.getElementById('fail-queue');
-  if(!failCola.length){ box.innerHTML=''; return; }
-  box.innerHTML=failCola.map(f=>{
-    const s=Math.max(0,Math.round((f.cuando-Date.now())/1000));
-    const mm=String(Math.floor(s/60)).padStart(2,'0'), ss=String(s%60).padStart(2,'0');
-    return '<div class="fq-item"><span class="fq-name">'+f.nombre+'</span>'
-      +'<span class="fq-time">'+mm+':'+ss+'</span>'
-      +'<button class="fq-cancel" onclick="cancelarAveria('+f.id+')">Cancelar</button></div>';
-  }).join('');
-}
-window.cancelarAveria=function(id){
-  const i=failCola.findIndex(f=>f.id===id);
-  if(i<0) return;
-  clearTimeout(failCola[i].t); const n=failCola[i].nombre;
-  failCola.splice(i,1); pintarCola(); showToast('Cancelada: '+n);
-};
-
-function programarAveria(ev,nombre){
-  // Si ya está rota, un clic la repara: el botón hace de interruptor
-  if(failActivas.has(ev)){ mandarAveria(ev,nombre,false); return; }
-  const min=failMinutos();
-  if(min<=0){ mandarAveria(ev,nombre,true); return; }
-  const id=++failSeq, cuando=Date.now()+min*60000;
-  const t=setTimeout(()=>{
-    mandarAveria(ev,nombre,true);
-    failCola=failCola.filter(f=>f.id!==id); pintarCola();
-  }, min*60000);
-  failCola.push({id:id, nombre:nombre, cuando:cuando, t:t});
-  pintarCola();
-  showToast(nombre+' programada en '+min+' min');
-}
-
-// Repara todo lo roto de una. Van espaciadas ~120 ms porque mandar doce eventos de
-// golpe hace que el sim se coma algunos.
-function repararTodo(){
-  const pendientes=[...failActivas];
-  if(!pendientes.length && !failCola.length){ showToast('No hay averías activas'); return; }
-  failCola.forEach(f=>clearTimeout(f.t)); failCola=[]; pintarCola();
-  if(!pendientes.length){ showToast('Programadas canceladas'); return; }
-  pendientes.forEach((ev,i)=>setTimeout(()=>mandarAveria(ev, failNombre[ev]||ev, false), i*120));
-}
-window.repararTodo=repararTodo;
-
-function pintarAverias(){
-  document.getElementById('fail-body').innerHTML=AVERIAS.map(([ev,nom])=>{
-    const roto=failActivas.has(ev);
-    return '<span class="fail-item'+(roto?' roto':'')+'" data-ev="'+ev+'" data-nom="'+nom+'"'
-      +' title="'+(roto?'Tocá para reparar':'Tocá para averiar')+'">'
-      +'<svg class="fi-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 8v5M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg>'
-      +nom+'</span>';
-  }).join('');
-  document.querySelectorAll('#fail-body .fail-item').forEach(el=>{
-    el.onclick=()=>programarAveria(el.dataset.ev, el.dataset.nom);
-  });
-  const b=document.getElementById('fail-repair');
-  if(b){ const n=failActivas.size; b.textContent = n?('Reparar todo ('+n+')'):'Reparar todo'; b.disabled=!n && !failCola.length; }
-}
-document.querySelectorAll('.fail-mode').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('.fail-mode').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); failMin=parseFloat(b.dataset.min)||0;
-  document.getElementById('fail-min').value='';
-});
-document.getElementById('fail-repair').onclick=repararTodo;
-document.getElementById('btn-fail').onclick=()=>{
-  pintarAverias(); pintarCola();
-  document.getElementById('fail-modal').classList.remove('hidden');
-};
-document.getElementById('fail-close').onclick=()=>document.getElementById('fail-modal').classList.add('hidden');
-document.getElementById('fail-modal').addEventListener('click',e=>{ if(e.target.id==='fail-modal') e.currentTarget.classList.add('hidden'); });
-setInterval(()=>{ if(failCola.length) pintarCola(); },1000);   // cuenta regresiva en vivo
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.getElementById('fail-modal').classList.add('hidden'); });
 
 // ---- Historial de vuelos ----
 function fmtFecha(ts){
@@ -249,7 +116,7 @@ function fmtFecha(ts){
 }
 function renderHist(list){
   const box=document.getElementById('hist-body');
-  if(!list.length){ box.innerHTML='<div class="hist-empty">Todavía no hay vuelos guardados.<br>Se guardan solos al aterrizar, o al tocar "Reiniciar ruta".</div>'; return; }
+  if(!list.length){ box.innerHTML='<div class="hist-empty">Todavía no hay vuelos guardados.<br>Se guardan solos al aterrizar y quedar quieto en tierra.</div>'; return; }
   box.innerHTML=list.map(f=>{
     const de=f.from_icao||'----', a=f.to_icao||'----';
     const kms=km(f.distance_nm);
@@ -257,7 +124,8 @@ function renderHist(list){
     const alt=f.max_alt_ft?Math.round(f.max_alt_ft).toLocaleString('en-US')+' ft':'';
     return '<div class="hist-item">'
       +'<span class="hist-main"><span class="hist-route">'+de+' → '+a+'</span>'
-      +'<span class="hist-sub">'+fmtFecha(f.start_time)+(alt?(' · máx '+alt):'')+'</span></span>'
+      +'<span class="hist-sub">'+fmtFecha(f.start_time)+(alt?(' · máx '+alt):'')
+        +(f.landing_fpm!=null?(' · toque '+nf(f.landing_fpm)+' ft/min'):'')+'</span></span>'
       +'<span class="hist-nums">'+nf(kms)+' km<span>'+Math.round(f.distance_nm||0)+' NM · '+fmtHm(min)+'</span></span>'
       +'<button class="hist-del" title="Borrar" onclick="delHist('+f.id+')">✕</button></div>';
   }).join('');
@@ -347,46 +215,203 @@ function startTelemetry(){
   setInterval(poll,100);   // 10 lecturas por segundo
 }
 
+// ---- Aterrizaje y fin del vuelo ----
+// Qué tal estuvo el toque, en ft/min (negativo = bajando). Los cortes son los habituales
+// entre simmers: menos de 60 es "mantequilla", más de 600 ya es para revisar el tren.
+function calificarAterrizaje(fpm){
+  const v=Math.abs(fpm);
+  if(v<60)  return {txt:'muy suave', color:'#4ade80'};
+  if(v<240) return {txt:'suave', color:'#4ade80'};
+  if(v<400) return {txt:'firme', color:'#fbbf24'};
+  if(v<600) return {txt:'duro', color:'#fb923c'};
+  return {txt:'muy duro', color:'#ef4444'};
+}
+// El backend marca cada toque de pista en `aterrizaje` (ver _registrar_aterrizaje): se
+// avisa al toque, sin esperar a que el vuelo se cierre.
+let ultimoToquePista=null;
+function avisarAterrizaje(s){
+  const a=s && s.aterrizaje;
+  if(!a || a.t===ultimoToquePista) return;
+  const primera=ultimoToquePista===null && (Date.now()/1000 - a.t) > 20;   // viejo: al abrir la app
+  ultimoToquePista=a.t;
+  if(primera) return;
+  const c=calificarAterrizaje(a.fpm);
+  showToast('Aterrizaje: '+nf(a.fpm)+' ft/min · '+c.txt);
+}
+
 // El backend cierra el vuelo solo al aterrizar y quedar quieto. Cuando eso pasa manda
-// un timestamp nuevo en `guardado_en`: lo avisamos una sola vez.
+// un timestamp nuevo en `guardado_en`: se muestra el resumen una sola vez.
 let ultimoGuardado=null;
 function avisarGuardado(s){
+  avisarAterrizaje(s);
   const t=s && s.guardado_en;
   if(!t){ ultimoGuardado=null; return; }
   if(t===ultimoGuardado) return;
+  const primera=ultimoGuardado===null && (Date.now()/1000 - t) > 120;      // ya estaba guardado al abrir
   ultimoGuardado=t;
-  showToast('Vuelo guardado en el historial ✓');
+  if(primera) return;
+  fetch('/api/history').then(r=>r.json()).then(list=>{
+    const f=(list||[]).reduce((a,b)=>(!a||b.id>a.id)?b:a, null);
+    if(f) mostrarResumen(f); else showToast('Vuelo guardado en el historial ✓');
+  }).catch(()=>showToast('Vuelo guardado en el historial ✓'));
 }
-
-// ---- Tamaño de los paneles ----
-// Va al FINAL del script y dentro de su propia función a propósito. La vez pasada esto
-// mismo se ejecutaba en medio del archivo y consultaba `chart`, que está declarado más
-// abajo con `let`: leer una variable `let` antes de su línea lanza un error (y `typeof`
-// NO protege de eso), así que el script se cortaba ahí y se caía media app. Acá abajo ya
-// existe todo, y aun así el acceso al gráfico va diferido y envuelto en try.
-(function(){
-  const MIN=0.6, MAX=1.3;
-  // Cada panel tiene su propia escala y su propio valor por defecto: el de datos se lee
-  // todo el tiempo y conviene grande; el de progreso es de consulta y estorba menos chico.
-  const PANELES=[
-    { css:'--ui-izq', clave:'uiScaleIzq', def:1,   sl:'ui-izq', val:'ui-izq-val' },
-    { css:'--ui-der', clave:'uiScaleDer', def:0.9, sl:'ui-der', val:'ui-der-val' },
+function mostrarResumen(f){
+  const min = f.flight_min || ((f.start_time&&f.end_time)?(f.end_time-f.start_time)/60:0);
+  const celdas=[
+    ['Distancia', nf(km(f.distance_nm))+' km', Math.round(f.distance_nm||0)+' NM'],
+    // Debajo, lo que duró en la vida real (con sim rate x4 es mucho menos)
+    ['Tiempo de vuelo', fmtHm(min), (f.takeoff_real&&f.end_time)?('real '+fmtHm((f.end_time-f.takeoff_real)/60)):'reloj del simulador'],
+    ['Altura máxima', f.max_alt_ft?fmtFL(f.max_alt_ft):'--', f.max_alt_ft?nf(Math.round(f.max_alt_ft))+' ft':''],
+    ['Combustible usado', f.fuel_used_gal!=null?nf(Math.round(f.fuel_used_gal))+' gal':'--',
+      f.fuel_used_gal!=null?nf(Math.round(f.fuel_used_gal*3.78541))+' L':'sin dato'],
   ];
-  function aplicar(p, k, guardar){
-    k=Math.round(Math.max(MIN,Math.min(MAX, parseFloat(k)||p.def))*10)/10;
-    document.documentElement.style.setProperty(p.css, String(k));
-    const sl=document.getElementById(p.sl); if(sl) sl.value=k;
-    const val=document.getElementById(p.val); if(val) val.textContent=Math.round(k*100)+'%';
-    if(guardar) localStorage.setItem(p.clave, String(k));
-    // El canvas del gráfico hay que redimensionarlo a mano, con la medida SIN escalar
-    if(p.css==='--ui-izq') setTimeout(function(){ try{ ajustarGrafico(); }catch(e){} }, 60);
+  let html='<div class="rs-ruta">'+(f.from_icao||'----')+'<i>→</i>'+(f.to_icao||'----')+'</div>'
+    +'<div class="rs-nombres">'+(f.from_name||'')+(f.to_name?' → '+f.to_name:'')+'</div><div class="rs-grid">';
+  celdas.forEach(c=>{ html+='<div><span>'+c[0]+'</span><b>'+c[1]+'</b><small>'+c[2]+'</small></div>'; });
+  if(f.landing_fpm!=null){
+    const c=calificarAterrizaje(f.landing_fpm);
+    html+='<div class="rs-aterrizaje"><span>Aterrizaje</span><b style="color:'+c.color+'">'+nf(f.landing_fpm)
+      +' ft/min</b><small>'+c.txt+'</small></div>';
   }
-  PANELES.forEach(function(p){
-    const g=parseFloat(localStorage.getItem(p.clave));
-    aplicar(p, (g>=MIN&&g<=MAX)?g:p.def, false);
-    const sl=document.getElementById(p.sl);
-    if(sl) sl.oninput=function(){ aplicar(p, sl.value, true); };
+  document.getElementById('rs-body').innerHTML=html+'</div>';
+  document.getElementById('resumen-modal').classList.remove('hidden');
+}
+document.getElementById('rs-close').onclick=()=>document.getElementById('resumen-modal').classList.add('hidden');
+document.getElementById('resumen-modal').addEventListener('click',e=>{ if(e.target.id==='resumen-modal') e.currentTarget.classList.add('hidden'); });
+
+
+// ---- Dock de abajo: estante (•••) y su alto ----
+(function(){
+  const pila=document.getElementById('dock-pila'), dock=document.getElementById('dock');
+  const est=document.getElementById('dock-estante'), mas=document.getElementById('dk-mas');
+  if(!pila||!dock||!est||!mas) return;
+  // Antes los paneles de datos y de progreso se movían y giraban: lo guardado ya no sirve
+  try{ ['movible.left-stack','movible.progress-panel','movible.bottom-center'].forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  // El estante se recuerda abierto o cerrado. La primera vez arranca abierto (como en el
+  // diseño), así se ve que existe.
+  let abierto=true;
+  try{ abierto=localStorage.getItem('dock.estante')!=='0'; }catch(e){}
+  function pintar(){ est.classList.toggle('hidden',!abierto); mas.classList.toggle('on',abierto); }
+  mas.addEventListener('click',()=>{
+    abierto=!abierto; pintar();
+    try{ localStorage.setItem('dock.estante',abierto?'1':'0'); }catch(e){}
   });
-  const rst=document.getElementById('ui-reset');
-  if(rst) rst.onclick=function(){ PANELES.forEach(function(p){ aplicar(p, p.def, true); }); };
+  pintar();
+  // La brújula, la "P", el zoom y el chip de la ruta se apoyan encima del dock (main.css).
+  // Y cada vez que cambia de alto (ruta, estante, gráfico) el avión se recentra en lo que
+  // queda de mapa.
+  const raiz=document.documentElement;
+  let tC=null;
+  function medir(){
+    raiz.style.setProperty('--dock-alto', dock.offsetHeight+'px');
+    raiz.style.setProperty('--pila-alto', pila.offsetHeight+'px');
+    clearTimeout(tC); tC=setTimeout(()=>{ try{ revisarCentrado(); }catch(e){} }, 150);
+  }
+  try{ const ro=new ResizeObserver(medir); ro.observe(pila); ro.observe(dock); }
+  catch(e){ window.addEventListener('resize',medir); }
+  medir();
+})();
+
+// ---- Barra de arriba movible ----
+// Se arrastra desde su tirador, tocarlo la gira (horizontal / vertical) y mantenerlo
+// pulsado la devuelve arriba al centro. Todo se recuerda entre sesiones. En celular no
+// aplica: ahí va fija (main.css).
+// Los paneles de datos y de progreso también se movían y giraban; desde el dock
+// (2026-11-21) son solo horizontales y fijos abajo, así que quedó solo la barra.
+// Se usan pointer events (mouse y dedo con el mismo código; Safari de iPad los tiene).
+(function(){
+  const PANELES=[
+    { id:'toolbar',        asa:'#btn-asa-barra', giro:null,                 def:'h', nombre:'Barra', tocarGira:true },
+  ];
+  const clave=c=>'movible.'+c.id;
+  function leer(c){ try{ return JSON.parse(localStorage.getItem(clave(c)))||{}; }catch(e){ return {}; } }
+  function escribir(c,d){ try{ localStorage.setItem(clave(c),JSON.stringify(d)); }catch(e){} }
+
+  // Lo saca de su lugar y lo deja en x,y de pantalla
+  function soltar(c, el){ el.classList.add('movido'); }
+  function ubicar(c, el, x, y){
+    const r=el.getBoundingClientRect();
+    if(r.width){                                   // oculto no se puede medir: se deja tal cual
+      x=Math.max(4, Math.min(window.innerWidth-r.width-4, x));
+      y=Math.max(4, Math.min(window.innerHeight-Math.min(r.height,120)-4, y));
+    }
+    el.style.left=Math.round(x)+'px'; el.style.top=Math.round(y)+'px';
+  }
+  // Vuelve a su lugar de siempre
+  function limpiar(c, el){
+    el.classList.remove('movido');
+    el.style.left=''; el.style.top='';
+  }
+  function orientar(c, el, o){ el.dataset.orient=o; }
+  function aplicar(c){
+    const el=document.getElementById(c.id); if(!el) return;
+    if(pantallaChica()){ limpiar(c,el); el.dataset.orient=c.def; return; }
+    const d=leer(c);
+    orientar(c, el, d.o||c.def);
+    if(d.x!=null && d.y!=null){ soltar(c,el); requestAnimationFrame(()=>ubicar(c,el,d.x,d.y)); }
+    else limpiar(c,el);
+  }
+  function girar(c){
+    const el=document.getElementById(c.id), d=leer(c);
+    d.o=(el.dataset.orient==='h')?'v':'h';
+    orientar(c, el, d.o); escribir(c,d);
+    if(el.classList.contains('movido')){ const r=el.getBoundingClientRect(); requestAnimationFrame(()=>ubicar(c,el,r.left,r.top)); }
+    showToast(c.nombre+': '+(d.o==='h'?'horizontal':'vertical'));
+  }
+  function resetear(c){
+    const el=document.getElementById(c.id);
+    try{ localStorage.removeItem(clave(c)); }catch(e){}
+    limpiar(c,el); orientar(c, el, c.def);
+    try{ revisarCentrado(); }catch(e){}
+    showToast(c.nombre+' en su lugar');
+  }
+
+  PANELES.forEach(c=>{
+    const el=document.getElementById(c.id), asa=document.querySelector(c.asa);
+    if(!el || !asa) return;
+    asa.style.touchAction='none';
+    let p=null;                                     // arrastre en curso
+    asa.addEventListener('pointerdown',e=>{
+      if(pantallaChica() || e.button>0) return;
+      p={x0:e.clientX, y0:e.clientY, movio:false, id:e.pointerId};
+      p.t=setTimeout(()=>{ if(p && !p.movio){ asa.classList.remove('agarrado'); p=null; resetear(c); } }, 700);
+      asa.classList.add('agarrado');
+      try{ asa.setPointerCapture(e.pointerId); }catch(err){}
+      e.preventDefault();
+    });
+    asa.addEventListener('pointermove',e=>{
+      if(!p || e.pointerId!==p.id) return;
+      if(!p.movio){
+        if(Math.hypot(e.clientX-p.x0, e.clientY-p.y0)<6) return;   // umbral: toque vs arrastre
+        p.movio=true; clearTimeout(p.t);
+        const r=el.getBoundingClientRect();
+        p.dx=p.x0-r.left; p.dy=p.y0-r.top;
+        soltar(c,el); ubicar(c,el,r.left,r.top);
+      }
+      ubicar(c, el, e.clientX-p.dx, e.clientY-p.dy);
+    });
+    const fin=e=>{
+      if(!p || (e && e.pointerId!==p.id)) return;
+      clearTimeout(p.t); asa.classList.remove('agarrado');
+      const movio=p.movio; p=null;
+      if(movio){
+        const d=leer(c), r=el.getBoundingClientRect();
+        d.x=r.left; d.y=r.top; escribir(c,d);
+        try{ revisarCentrado(); }catch(err){}
+      } else if(c.tocarGira) girar(c);
+    };
+    asa.addEventListener('pointerup',fin);
+    asa.addEventListener('pointercancel',fin);
+    // El tirador de la barra es un botón: que su click no haga nada más
+    if(c.tocarGira) asa.addEventListener('click',e=>e.preventDefault());
+    const g=c.giro && document.querySelector(c.giro);
+    if(g) g.addEventListener('click',e=>{ e.stopPropagation(); if(!pantallaChica()) girar(c); });
+    aplicar(c);
+  });
+
+  // Al rotar el iPad o cambiar el tamaño: que nada quede fuera de la pantalla, y al pasar a
+  // celular (o volver) se aplica o se quita todo.
+  let tRes=null;
+  window.addEventListener('resize',()=>{ clearTimeout(tRes); tRes=setTimeout(()=>PANELES.forEach(aplicar),200); });
+  try{ MQ_CHICA.addEventListener('change',()=>PANELES.forEach(aplicar)); }catch(e){}
 })();

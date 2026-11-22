@@ -17,10 +17,10 @@
     --orange: #fb923c;
     --amber: #fbbf24;
     --mono: 'JetBrains Mono', ui-monospace, monospace;
-    /* Tamaño de cada panel, por separado. La barra de herramientas, el zoom y la
-       brújula NO se escalan: son botones y tienen que seguir siendo cómodos de tocar. */
-    --ui-izq: 1;      /* panel de datos (altitud, velocidad, combustible…) */
-    --ui-der: 0.9;    /* progreso del vuelo */
+    /* Alto del dock y de toda la pila de abajo (dock + estante + gráfico). Los mide
+       tools-ui.js; la brújula, la "P", el zoom y el chip de la ruta se apoyan encima. */
+    --dock-alto: 120px;
+    --pila-alto: 120px;
   }
   *{ box-sizing:border-box; }
   html,body{ margin:0; height:100%; font-family:'Archivo','Roboto',system-ui,sans-serif; overflow:hidden; background:#0b0e14; }
@@ -38,25 +38,22 @@
   @media (prefers-reduced-motion: reduce){ .odo .od-r{ transition:none; } }
 
   /* Los iconos responden al toque: crecen un pelo y se hunden al apretar */
-  .tool-btn svg, .btn-sq svg, .btn svg, #compass svg, .fail-item .fi-ico{ transition:transform .22s cubic-bezier(.3,1.4,.5,1); }
+  .tool-btn svg, .btn-sq svg, .btn svg{ transition:transform .22s cubic-bezier(.3,1.4,.5,1); }
   .tool-btn:hover svg, .btn-sq:hover svg{ transform:scale(1.14); }
   .tool-btn:active svg, .btn-sq:active svg, .btn:active svg{ transform:scale(.9); }
   .tool-btn.disabled:hover svg{ transform:none; }
-  #btn-reset:hover svg{ transform:rotate(-180deg); }          /* la flechita de reinicio gira */
-  #compass:hover svg{ transform:scale(1.08); }
-  .fail-item:hover .fi-ico{ transform:rotate(12deg) scale(1.15); }
   /* Todo lo clicable se hunde rápido al apretar y vuelve despacio con un rebotito.
      La asimetría (0.06s al bajar, 0.4s al subir) es lo que lo hace sentir físico. */
-  .tool-btn, .btn, .btn-sq, .rc-btn, .st-chip, .tile-steps button, .fail-item, .fail-repair,
-  .off-reset, .hist-del, .fq-cancel, .layer-opt, .opt-item, .sp-item, .rr-btn, .fail-mode, .lp-btn{
+  .tool-btn, .btn, .btn-sq, .st-chip, .dk-simrate button, .dk-mas,
+  .hist-del, .layer-opt, .opt-item, .sp-item, .rr-btn, .lp-btn{
     transition:transform .4s cubic-bezier(.2,1.5,.4,1), background .18s, color .18s, box-shadow .18s;
     -webkit-tap-highlight-color:transparent; }
-  .tool-btn:active, .btn:active, .btn-sq:active, .rc-btn:active, .st-chip:active,
-  .tile-steps button:active, .fail-item:active, .fail-repair:active, .off-reset:active,
-  .hist-del:active, .fq-cancel:active, .layer-opt:active, .opt-item:active, .sp-item:active,
-  .rr-btn:active, .fail-mode:active, .lp-btn:active{
+  .tool-btn:active, .btn:active, .btn-sq:active, .st-chip:active,
+  .dk-simrate button:active, .dk-mas:active,
+  .hist-del:active, .layer-opt:active, .opt-item:active, .sp-item:active,
+  .rr-btn:active, .lp-btn:active{
     transform:scale(.93); transition-duration:.06s; }
-  .tool-btn.disabled:active, .fail-repair:disabled:active, .rc-btn:disabled:active{ transform:none; }
+  .tool-btn.disabled:active{ transform:none; }
   .pill .dot{ transition:background .3s; }
   #map{ position:absolute; inset:0; z-index:1; background:#0b0e14; }
   .maplibregl-ctrl-attrib, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left{ display:none !important; }
@@ -90,8 +87,8 @@
   @media (prefers-reduced-motion: reduce){ .w-spinner, #waiting .w-icon-plane{ animation:none; } }
 
   /* Panel del gráfico de velocidad/altitud */
-  /* El gráfico ya no tapa el mapa: cuelga debajo del panel de datos, en la misma columna */
-  #graph-panel{ width:100%; flex:none; height:212px; border-radius:24px; padding:16px 18px 12px;
+  /* Flota encima del estante del dock, centrado (se abre manteniendo pulsada "Distancia") */
+  #graph-panel{ width:min(480px,100%); flex:none; height:212px; border-radius:24px; padding:16px 18px 12px;
     color:var(--text); display:flex; flex-direction:column; }
   #graph-panel.hidden{ display:none; }
   .gp-head{ display:flex; align-items:center; justify-content:space-between; font-size:12px; font-weight:600; color:var(--text-dim); margin-bottom:10px; }
@@ -120,38 +117,6 @@
   /* Botón de editar (junto a la altitud) + modal de ajuste */
 
 
-  #fail-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
-  #fail-modal.hidden{ display:none; }
-  .fail-card{ width:min(94vw,520px); max-height:84vh; border-radius:20px; padding:18px 20px 18px; color:var(--text); display:flex; flex-direction:column; }
-  .fail-when{ margin-bottom:14px; }
-  .fail-k{ display:block; font-size:12.5px; color:var(--text-dim); font-weight:600; margin-bottom:8px; }
-  .fail-ctrl{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-  .fail-mode{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:#fff; font-family:inherit;
-    font-size:13px; font-weight:600; padding:8px 13px; border-radius:10px; }
-  .fail-mode.on{ background:#2f6df6; }
-  #fail-min{ width:76px; height:35px; border:none; border-radius:10px; background:rgba(255,255,255,0.08);
-    color:#fff; text-align:center; font-family:inherit; font-size:13px; font-weight:600; outline:none; }
-  #fail-body{ overflow-y:auto; display:grid; grid-template-columns:1fr 1fr; gap:7px; }
-  .fail-item{ display:flex; align-items:center; gap:9px; padding:10px 11px; border-radius:11px; cursor:pointer;
-    background:rgba(255,255,255,0.06); font-size:13px; font-weight:500; transition:background .15s; }
-  .fail-item:hover{ background:rgba(239,68,68,0.22); }
-  .fail-item .fi-ico{ width:16px; height:16px; flex:none; color:#fca5a5; }
-  /* Las que están rotas ahora mismo: un clic más las repara */
-  .fail-item.roto{ background:rgba(239,68,68,0.28); color:#fecaca; }
-  .fail-item.roto:hover{ background:rgba(74,222,128,0.24); color:#bbf7d0; }
-  .fail-item.roto .fi-ico{ color:#fecaca; }
-  .fail-repair{ width:100%; height:42px; margin-bottom:14px; border:none; border-radius:13px; cursor:pointer;
-    background:rgba(74,222,128,0.22); color:#bbf7d0; font-family:inherit; font-size:13.5px; font-weight:600;
-    display:flex; align-items:center; justify-content:center; transition:background .15s; }
-  .fail-repair:hover:not(:disabled){ background:rgba(74,222,128,0.34); }
-  .fail-repair:disabled{ opacity:.4; cursor:default; }
-  #fail-queue{ margin-top:12px; }
-  .fq-item{ display:flex; align-items:center; gap:10px; padding:9px 4px; border-top:1px solid var(--row-border); font-size:12.5px; }
-  .fq-name{ flex:1; }
-  .fq-time{ font-weight:700; color:#fb923c; font-variant-numeric:tabular-nums; }
-  .fq-cancel{ border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff; border-radius:8px;
-    font-size:11.5px; font-weight:600; padding:5px 9px; }
-
   /* Menú de rutas alternativas */
   #opts-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
   #opts-modal.hidden{ display:none; }
@@ -172,14 +137,36 @@
   #hist-body{ overflow-y:auto; margin-right:-6px; padding-right:6px; }
   .hist-item{ display:flex; align-items:center; gap:12px; padding:11px 2px; border-bottom:1px solid var(--row-border); }
   .hist-main{ flex:1; min-width:0; }
-  .hist-route{ font-size:15px; font-weight:700; letter-spacing:-0.2px; }
-  .hist-sub{ font-size:12px; color:var(--text-dim); margin-top:3px; }
+  /* display:block: son <span> y sin esto la fecha quedaba pegada a la ruta ("SKCG21-nov") */
+  .hist-route{ display:block; font-size:15px; font-weight:700; letter-spacing:-0.2px; }
+  .hist-sub{ display:block; font-size:12px; color:var(--text-dim); margin-top:3px; }
   .hist-nums{ text-align:right; font-size:13px; font-weight:600; white-space:nowrap; }
   .hist-nums span{ display:block; font-size:11px; color:var(--text-dim); font-weight:500; margin-top:3px; white-space:nowrap; }
   .hist-del{ border:none; cursor:pointer; background:rgba(239,68,68,0.16); color:#fca5a5; width:30px; height:30px;
     border-radius:9px; font-size:15px; flex:none; display:flex; align-items:center; justify-content:center; }
   .hist-del:hover{ background:rgba(239,68,68,0.3); }
   .hist-empty{ color:var(--text-dim); font-size:14px; padding:22px 4px; text-align:center; }
+
+  /* Cabecera común de los modales: título a la izquierda y la ✕ a la derecha, con un área
+     de toque de 40px (antes la ✕ quedaba pegada al título y era un blanco de 12px). */
+  .ed-head{ display:flex; align-items:center; justify-content:space-between; gap:12px;
+    font:600 15px/1.2 'Archivo',sans-serif; margin:-6px -8px 10px 0; }
+  .ed-head > span:last-child{ display:flex; align-items:center; justify-content:center; flex:none;
+    width:40px; height:40px; border-radius:12px; cursor:pointer; color:var(--text-dim); font-size:16px; }
+  .ed-head > span:last-child:active{ background:rgba(255,255,255,0.1); }
+  /* Resumen de fin de vuelo */
+  #resumen-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
+  #resumen-modal.hidden{ display:none; }
+  .rs-ruta{ display:flex; align-items:center; justify-content:center; gap:14px; margin:6px 0 4px;
+    font:600 30px/1 'Archivo',sans-serif; letter-spacing:-0.8px; }
+  .rs-ruta i{ font-style:normal; font-size:20px; color:var(--text-dim); }
+  .rs-nombres{ text-align:center; font-size:11.5px; color:var(--text-dim); margin-bottom:16px; }
+  .rs-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .rs-grid > div{ background:rgba(255,255,255,0.07); border-radius:12px; padding:10px 12px; }
+  .rs-grid span{ display:block; font-size:11px; color:var(--text-dim); }
+  .rs-grid b{ display:block; font:600 17px/1.25 var(--mono); margin-top:3px; }
+  .rs-grid small{ display:block; font-size:11px; color:var(--text-dim); margin-top:2px; }
+  .rs-grid .rs-aterrizaje{ grid-column:span 2; }
 
   /* Panel de estado del avión */
   #status-modal{ position:absolute; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); }
@@ -189,29 +176,6 @@
   .st-label{ color:var(--text-dim); font-size:14px; font-weight:500; }
   .st-val{ font-size:14px; font-weight:600; text-align:right; }
   .st-val.on{ color:#4ade80; } .st-val.off{ color:var(--text-dim); }
-  /* Corrimiento horizontal del avión cuando el mapa lo sigue: el panel de datos tapa la
-     izquierda, así que a veces conviene empujarlo hacia la derecha. */
-  .off-box{ padding:14px 15px 12px; border-radius:16px; background:rgba(255,255,255,0.06); margin-bottom:16px; }
-  .off-top{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; }
-  .off-k{ font-size:13px; font-weight:600; color:var(--text); }
-  .off-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12px; color:var(--text-dim); }
-  .off-box input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:3px; outline:none; cursor:pointer;
-    background:linear-gradient(90deg,rgba(255,255,255,0.14),rgba(251,191,36,0.35),rgba(255,255,255,0.14)); }
-  .off-box input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; appearance:none; width:20px; height:20px; border-radius:50%;
-    background:var(--amber); border:none; cursor:pointer; box-shadow:0 3px 10px rgba(251,191,36,0.45); transition:transform .15s; }
-  .off-box input[type=range]::-webkit-slider-thumb:hover{ transform:scale(1.15); }
-  .off-box input[type=range]::-moz-range-thumb{ width:20px; height:20px; border-radius:50%; background:var(--amber); border:none; cursor:pointer; }
-  .off-box + .off-box{ margin-top:-6px; }
-  .ui-row{ display:flex; align-items:center; gap:10px; margin-top:11px; }
-  .ui-row .ui-k{ width:60px; flex:none; font-size:11.5px; font-weight:500; color:var(--text-dim); }
-  .ui-row input[type=range]{ flex:1; }
-  .ui-row .ui-v{ width:38px; flex:none; text-align:right; font-family:var(--mono);
-    font-variant-numeric:tabular-nums; font-size:11.5px; color:var(--text); }
-  .off-scale{ display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-dim); margin-top:10px; }
-  .off-reset{ border:none; cursor:pointer; background:rgba(255,255,255,0.12); color:var(--text);
-    font-family:inherit; font-size:11px; font-weight:600; padding:5px 11px; border-radius:9px; }
-  .off-reset:hover{ background:rgba(255,255,255,0.24); }
-
   .st-chips{ display:flex; gap:8px; flex-wrap:wrap; width:100%; }
   .st-chip{ flex:1; min-width:88px; text-align:center; font-size:13px; font-weight:600; padding:13px 10px;
     border-radius:14px; background:rgba(255,255,255,0.08); color:var(--text-dim); cursor:pointer; transition:background .15s,color .15s; }
@@ -256,17 +220,8 @@
     font-weight:600; }
   .lp-input:focus{ outline:none; border-color:#f59e0b; }
 
-  /* Botón "+ punto" del chip de ruta */
-  .rc-btn{ border:none; border-radius:18px; height:36px; padding:0 15px; background:rgba(168,85,247,0.55); color:#fff;
-    font-family:inherit; font-size:12.5px; font-weight:600; cursor:pointer; transition:filter .15s; }
-  .rc-btn:hover{ filter:brightness(1.15); }
-  .rc-btn.on{ background:#a855f7; }
-  .rc-btn.rc-mcdu{ background:rgba(14,165,233,0.5); }
-  .rc-btn.rc-x{ width:36px; padding:0; background:rgba(255,255,255,0.12); color:var(--text-dim); font-size:12px; }
-  .rc-btn:disabled{ opacity:.55; cursor:default; }
-
   /* Aviso de hora de llegada (aparece 10s al crear/cambiar la ruta) */
-  #eta-toast{ position:absolute; top:78px; left:50%; transform:translateX(-50%); z-index:1700; padding:12px 20px; border-radius:14px; font-size:14.5px; font-weight:700; color:var(--text); white-space:nowrap; }
+  #eta-toast{ position:absolute; top:98px; left:50%; transform:translateX(-50%); z-index:1700; padding:12px 20px; border-radius:14px; font-size:14.5px; font-weight:700; color:var(--text); white-space:nowrap; }
   #eta-toast.hidden{ display:none; }
 
   /* Buscador de aeropuertos */
@@ -291,115 +246,38 @@
   .glass.bar{ background:var(--bar-bg); border-color:var(--bar-brd);
     box-shadow:0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.35); }
 
-  /* La columna entera hace scroll si no entra; así el panel de datos NUNCA se comprime
-     cuando se abre el gráfico (antes le cortaba las últimas filas). */
-  /* El escalado no cambia la caja que el elemento ocupa, solo cómo se ve. Por eso el
-     max-height se divide por la escala: si no, al achicar la UI el scroll aparecía antes
-     de tiempo aunque sobrara pantalla. */
-  #left-stack{ position:absolute; top:26px; left:26px; z-index:1000; width:346px; display:flex; flex-direction:column;
-    gap:12px; max-height:calc((100% - 52px) / var(--ui-izq)); overflow-y:auto; scrollbar-width:none; padding-right:2px;
-    transform:scale(var(--ui-izq)); transform-origin:top left; }
-  #left-stack::-webkit-scrollbar{ display:none; }
-
-  /* Barra de título: ahora vive fuera de la tarjeta de datos */
-
-  #panel{ width:100%; flex:none; border-radius:24px; color:var(--text); padding:20px 20px 18px; }
-
-
-  /* Dato principal: altitud y velocidad, uno al lado del otro */
-  .hero{ display:flex; gap:20px; }
-  .hero-cell{ flex:1; min-width:0; }
-  .hero-k{ display:block; font-size:11px; font-weight:500; color:var(--text-dim); }
-  /* flex-end en vez de baseline: los rodillos del odómetro recortan por abajo y su
-     "baseline" no es la de una cifra normal, así la unidad no queda flotando */
-  .hero-v{ display:flex; align-items:flex-end; gap:5px; margin-top:8px; }
-  .hero-v .u{ padding-bottom:0.1em; }
-  .hero-v .n{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:30px; font-weight:500; line-height:1; letter-spacing:-1px; }
-  .hero-v .u{ font-size:12px; color:var(--text-dim); }
-  .hero-sub{ display:block; font-size:11px; font-weight:400; color:var(--text-dim); margin-top:8px;
-    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .hero-sub.green{ color:var(--green); } .hero-sub.orange{ color:var(--orange); }
-
-  /* Fila de fichas: rumbo, distancia, sim rate */
-  .tiles{ display:flex; gap:8px; margin-top:18px; }
-  .tile{ flex:1; min-width:0; padding:11px 12px; border-radius:14px; background:rgba(255,255,255,0.08); position:relative; }
-  .tile-k{ display:block; font-size:10.5px; font-weight:500; color:var(--text-dim); }
-  .tile-v{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:16px; font-weight:500; margin-top:7px; }
-  .tile-v{ display:flex; align-items:flex-end; }
-  .tile-v .uu{ font-family:'Archivo',sans-serif; font-size:10.5px; color:var(--text-dim); margin-left:3px; padding-bottom:0.15em; }
-  .tile-v.orange{ color:var(--orange); }
-  .tile-sub{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:10.5px; color:var(--text-dim); margin-top:4px; }
-  /* Los − + del sim rate viven dentro de la ficha, sin robarle sitio al número */
-  .tile-steps{ position:absolute; right:6px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:4px; }
-  .tile-steps button{ width:28px; height:24px; border:none; border-radius:8px; cursor:pointer;
-    background:rgba(255,255,255,0.14); color:var(--text); font-family:inherit; font-size:15px; font-weight:600;
-    line-height:1; display:flex; align-items:center; justify-content:center; padding:0; }
-  .tile-steps button:hover{ background:rgba(255,255,255,0.30); }
-
-  /* Filas de abajo: tiempo, combustible, clima */
-  .krow{ margin-top:15px; padding-top:15px; border-top:1px solid var(--row-border); }
-  .krow-line{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
-  .krow-k{ font-size:12px; font-weight:500; color:var(--text-dim); }
-  .krow-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }
-  .krow-sub{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); margin-top:9px; }
-  .wx-v{ display:flex; align-items:baseline; gap:9px; }
-  .wx-v .wx-sub{ font-size:11.5px; color:var(--text-dim); font-family:'Archivo',sans-serif; }
-  .fuel-bar{ height:8px; border-radius:4px; background:rgba(255,255,255,0.14); overflow:hidden; margin-top:11px; display:none; }
-  .fuel-fill{ display:block; height:100%; width:0%; border-radius:4px; background:#4ade80; box-shadow:0 0 14px rgba(74,222,128,0.5); transition:width .5s, background .5s; }
-
-  .panel-foot{ display:flex; gap:8px; margin-top:18px; }
   .btn{ flex:1; height:46px; border:none; cursor:pointer; background:rgba(255,255,255,0.14); color:#fff;
     font-family:inherit; font-size:13.5px; font-weight:600; border-radius:15px;
     display:flex; align-items:center; justify-content:center; gap:9px;
     box-shadow:inset 0 1px 0 rgba(255,255,255,0.28); transition:background .15s; }
   .btn:hover{ background:rgba(255,255,255,0.22); }
-  /* Botón cuadrado de luces, al lado de "Reiniciar ruta" */
   .btn-sq{ width:46px; height:46px; flex:none; border:none; cursor:pointer; border-radius:15px;
     background:rgba(255,255,255,0.10); color:var(--text-dim);
     display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
   .btn-sq:hover{ background:rgba(255,255,255,0.20); color:#fff; }
   .btn-sq.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
 
-  /* Barra de progreso del vuelo (estilo Flightradar24) */
-  /* Por defecto vive arriba a la derecha, bajo la barra de herramientas */
-  #progress-panel{ width:348px; border-radius:24px; color:var(--text); padding:18px 20px 20px;
-    transform:scale(var(--ui-der)); transform-origin:top right; }
-  #progress-panel.hidden{ display:none; }
-  /* Suelto y arrastrable, escala desde la esquina que sigue al cursor */
-  #progress-panel.floating{ position:fixed; width:348px; z-index:1600; transform-origin:top left; }
-  /* Colapsado, el panel debía seguir midiendo 348px de ancho aunque el cuerpo esté oculto:
-     en pantallas chicas eso tapaba media pantalla y era imposible mover el mapa con el dedo
-     sin apagar el panel entero. Colapsado, que ocupe solo lo que el título necesita. */
-  #progress-panel.collapsed{ width:auto; max-width:220px; padding-right:16px; }
-  #progress-panel .panel-head{ display:flex; align-items:center; gap:10px; margin-bottom:16px;
-    cursor:grab; user-select:none; -webkit-user-select:none; }
-  #progress-panel .panel-head:active{ cursor:grabbing; }
-  #progress-panel .panel-head h1{ flex:1; font-size:12px; font-weight:600; margin:0; color:var(--text-dim); }
-  #progress-panel .panel-head .logo{ display:none; }
-  #pg-caret{ color:rgba(246,248,251,0.45); flex:none; transition:transform .2s; }
-  #progress-panel.collapsed .panel-head{ margin-bottom:0; }
-  #progress-panel.collapsed #pg-caret{ transform:rotate(90deg); }
-  #progress-panel.collapsed .pg-body{ display:none; }
-  .pg-ends{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-  .pg-end{ display:flex; flex-direction:column; min-width:0; }
-  .pg-end.to{ align-items:flex-end; text-align:right; }
-  .pg-icao{ font-size:28px; font-weight:600; letter-spacing:-0.8px; line-height:1; }
-  .pg-city{ font-size:11px; line-height:1.3; color:var(--text-dim); font-weight:400; margin-top:6px; max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .pg-mid{ display:flex; align-items:center; justify-content:center; flex:none; padding-top:2px; }
-  .pg-plane-badge{ width:34px; height:34px; border-radius:50%; background:rgba(251,191,36,0.9);
-    display:flex; align-items:center; justify-content:center; color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
-  #pg-badge-icon{ transition:transform .5s ease; }
-  .pg-track{ position:relative; height:8px; border-radius:4px; background:rgba(255,255,255,0.14); margin:20px 0 11px; overflow:hidden; }
-  .pg-fill{ position:absolute; left:0; top:0; height:100%; border-radius:4px; width:0%;
-    background:linear-gradient(90deg, rgba(251,191,36,0.5), #fbbf24); transition:width .6s; }
-  .pg-nums{ display:flex; justify-content:space-between; font-size:11px; color:var(--text-dim); font-weight:400; }
-  .pg-nums b{ color:var(--text); font-weight:600; }
-  .pg-rows{ display:flex; flex-direction:column; gap:11px; margin-top:18px; padding-top:16px; border-top:1px solid var(--row-border); }
   .pg-brg{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; }
   .pg-brg .pg-k{ color:var(--text-dim); font-weight:500; }
   .pg-brg .pg-v{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:13px; font-weight:500; color:var(--text); }
   .pg-brg .pg-v.amber{ font-family:'Archivo',sans-serif; font-size:13px; font-weight:600; color:var(--amber); }
   .pg-vwrap{ display:flex; align-items:baseline; gap:7px; }
+  /* Flechita que apunta hacia el rumbo, igual que en el mapa (se gira con el mapa si lo
+     rotás). La gira girarFlecha() en geo-utils.js. */
+  .flecha-rumbo{ display:inline-flex; width:13px; height:13px; margin-left:6px; align-self:center; flex:none;
+    transition:transform .35s ease-out; }
+  .flecha-rumbo svg{ width:100%; height:100%; fill:currentColor; }
+  .pg-vwrap .flecha-rumbo{ margin:0; color:var(--amber); }
+  /* Filas que cambian con un toque (llegada: hora sim / hora real) */
+  .pg-tocable{ cursor:pointer; -webkit-tap-highlight-color:transparent; border-radius:8px; }
+  .pg-tocable.real .pg-k, .pg-tocable.real .pg-v{ color:#fbbf24 !important; }
+  /* Casilla que se mantiene pulsada (Distancia → gráfico): puntito como las filas de la
+     tabla, y se hunde un poco mientras la apretás para que se note que algo va a pasar. */
+  .tile-pulsable{ position:relative; cursor:pointer; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none;
+    transition:transform .45s ease-out, background .2s; }
+  .tile-pulsable::after{ content:''; position:absolute; right:8px; top:8px; width:4px; height:4px; border-radius:50%;
+    background:rgba(125,211,252,0.6); }
+  .tile-pulsable.apretando{ transform:scale(.95); background:rgba(125,211,252,0.12); }
   .pg-tabla-btn{ display:flex; align-items:center; justify-content:center; width:20px; height:20px;
     border-radius:5px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06);
     color:var(--text-dim); font-size:12px; line-height:1; cursor:pointer; padding:0; flex:none; }
@@ -423,9 +301,10 @@
   #tabla-close:hover{ opacity:1; }
   .tabla-avion{ margin-top:8px; font-size:11px; font-weight:500; color:rgba(246,248,251,0.45); }
 
-  .pg-tabla-perfiles{ display:flex; gap:4px; margin-top:12px; }
-  .pg-perfil{ font:600 9.5px/1 var(--mono); color:var(--text-dim); background:rgba(255,255,255,0.06);
-    border:1px solid rgba(255,255,255,0.09); border-radius:6px; padding:4px 7px; cursor:pointer;
+  /* 8 perfiles: bajan de línea. Alto mínimo de 32px para apuntarles con el dedo en el iPad. */
+  .pg-tabla-perfiles{ display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
+  .pg-perfil{ font:600 11px/1 var(--mono); color:var(--text-dim); background:rgba(255,255,255,0.06);
+    border:1px solid rgba(255,255,255,0.09); border-radius:8px; padding:0 10px; min-height:32px; cursor:pointer;
     transition:background .15s, color .15s, border-color .15s; }
   .pg-perfil:hover{ background:rgba(255,255,255,0.12); color:var(--text); }
   .pg-perfil.on{ background:rgba(125,211,252,0.18); border-color:rgba(125,211,252,0.45); color:#7dd3fc; }
@@ -453,26 +332,134 @@
   .pg-tabla-pie .alto{ color:#fb923c; }
   .pg-tabla-pie .senda{ color:#4ade80; }
 
-  .pg-next{ margin-top:16px; padding:13px 14px; border-radius:16px;
-    background:rgba(125,211,252,0.12); border:1px solid rgba(125,211,252,0.20); }
-  .pg-next-head{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
-  .pg-next-k{ font-size:10.5px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; color:rgba(186,230,253,0.65); }
-  .pg-next-name{ font-size:15px; font-weight:600; letter-spacing:-.2px; color:#e0f2fe; }
-  /* Sin puntos intermedios: la ficha sigue visible, apagada */
-  .pg-next.vacio{ background:rgba(255,255,255,0.05); border-color:rgba(255,255,255,0.10); }
-  .pg-next.vacio .pg-next-name{ font-size:12px; font-weight:500; color:rgba(246,248,251,0.5); }
-  .pg-next.vacio .pg-nx b, .pg-next.vacio .pg-nx i{ color:rgba(246,248,251,0.4); }
-  .pg-next-track{ position:relative; height:4px; border-radius:2px; background:rgba(255,255,255,0.16); margin-top:11px; }
-  /* Tres fichas: distancia (con sus dos unidades juntas), tiempo y rumbo */
-  .pg-next-nums{ display:flex; gap:8px; margin-top:11px; }
-  .pg-nx{ flex:1; min-width:0; text-align:center; padding:8px 4px 7px; border-radius:10px; background:rgba(255,255,255,0.07); }
-  .pg-nx b{ display:block; font-family:var(--mono); font-variant-numeric:tabular-nums;
-    font-size:15px; font-weight:500; color:#e0f2fe; white-space:nowrap; }
-  .pg-nx b em{ font-style:normal; font-family:'Archivo',sans-serif; font-size:9.5px;
-    font-weight:500; color:rgba(186,230,253,0.6); margin-left:3px; }
-  .pg-nx i{ display:block; font-style:normal; font-size:10px; font-weight:500;
-    color:rgba(186,230,253,0.6); margin-top:4px; white-space:nowrap; }
-  .pg-next-fill{ position:absolute; left:0; top:0; height:100%; width:0%; border-radius:2px; background:#7dd3fc; transition:width .6s; }
+  /* ==== Dock de abajo (rediseño 2026-11-21, ver index.html) ====
+     Una pila pegada abajo: el dock (siempre), el estante (•••) y el gráfico. La pila no
+     recibe toques, solo sus hijos (el mismo truco que la barra de arriba): el hueco a los
+     costados del estante sigue moviendo el mapa. */
+  #dock-pila{ position:absolute; left:16px; right:16px; bottom:16px; z-index:1000; display:flex;
+    flex-direction:column; align-items:center; gap:10px; pointer-events:none; }
+  #dock-pila > *{ pointer-events:auto; }
+  /* El dock mide lo que su contenido (centrado), con o sin ruta. Con ruta se estiraba a
+     todo el ancho y la guía quedaba con un hueco enorme entre etiqueta y valor. */
+  #dock{ width:auto; max-width:100%; border-radius:30px; color:var(--text); padding:12px 12px 12px 22px; }
+  #dock-pila:not(.con-ruta) .solo-ruta{ display:none !important; }
+
+  /* -- Fila principal -- */
+  .dk-main{ display:flex; align-items:stretch; gap:18px; min-height:88px; }
+  .dk-hero{ flex:0 0 auto; min-width:170px; display:flex; flex-direction:column; justify-content:center; }
+  .dk-hero-vel{ min-width:140px; }
+  .hero-k{ display:block; font-size:12px; font-weight:500; color:var(--text-dim); }
+  /* flex-end en vez de baseline: los rodillos del odómetro recortan por abajo y su
+     "baseline" no es la de una cifra normal, así la unidad no queda flotando */
+  .hero-v{ display:flex; align-items:flex-end; gap:5px; margin-top:6px; }
+  .hero-v .n{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:40px; font-weight:500; line-height:1; letter-spacing:-1.5px; }
+  .hero-v .u{ font-size:13px; color:var(--text-dim); padding-bottom:0.12em; }
+  .hero-sub{ display:block; font-size:12px; color:rgba(246,248,251,0.74); margin-top:7px; white-space:nowrap; }
+  .hero-sub.green{ color:var(--green); } .hero-sub.orange{ color:var(--orange); }
+  .dk-sep{ width:1px; flex:none; margin:6px 0; background:rgba(255,255,255,0.12); }
+  .dk-k{ display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:500; color:var(--text-dim); white-space:nowrap; }
+  .dk-v{ display:flex; align-items:flex-end; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:16px; font-weight:500; white-space:nowrap; }
+  .dk-v .uu{ font-family:'Archivo',sans-serif; font-size:11px; color:var(--text-dim); margin-left:4px; padding-bottom:.12em; }
+  .dk-s{ font-size:11px; color:var(--text-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dk-s b{ color:var(--text); font-weight:600; }
+  /* Puntito celeste: "esto se toca". En el iPad no hay hover que lo avise. */
+  .dk-punto{ display:inline-block; width:6px; height:6px; border-radius:50%; background:#7dd3fc; flex:none; }
+
+  .dk-llegada{ flex:0 0 auto; min-width:128px; display:flex; flex-direction:column; justify-content:center; gap:3px; }
+  .dk-eta{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:26px; font-weight:500; line-height:1.1; }
+  .dk-llegada.real .dk-k, .dk-llegada.real .dk-eta, .dk-llegada.real .dk-s{ color:#fbbf24 !important; }
+
+  /* La guía: grilla chica, etiqueta corta y valor (con su color) pegado al lado. Antes
+     eran tres filas a todo el ancho con el valor en la otra punta: mucho espacio vacío. */
+  .dk-guia{ flex:0 1 auto; min-width:0; max-width:330px; display:grid; grid-template-columns:auto minmax(0,1fr);
+    column-gap:12px; row-gap:4px; align-content:center; }
+  .dk-guia .pg-brg{ display:contents; }
+  .dk-guia .pg-k{ font-size:11px; color:var(--text-dim); white-space:nowrap; align-self:center; }
+  .dk-guia .pg-vwrap{ min-width:0; display:flex; align-items:center; gap:6px; }
+  .dk-guia .pg-v{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left;
+    font-size:12.5px; line-height:20px; }
+
+  .dk-rumbo{ flex:0 0 auto; width:116px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; }
+  .dk-rosa{ position:relative; width:62px; height:62px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.3);
+    display:flex; align-items:center; justify-content:center; }
+  .dk-rosa .dk-hdg{ width:20px; height:20px; margin:0; color:var(--text); }
+  /* Marcador del destino: un punto ámbar sobre el borde, unido al avión por una línea
+     tenue. Gira alrededor de la rosa según dónde queda el destino respecto de la nariz
+     (pintarRosa). Verde cuando vas derecho. Antes era una flecha: hacia adentro parecía
+     al revés y hacia afuera confundía. */
+  .dk-bug{ position:absolute; inset:-6px; transition:transform .35s ease-out; pointer-events:none; }
+  .dk-bug::before{ content:''; position:absolute; left:50%; top:12px; height:14px; margin-left:-1px;
+    border-left:2px dotted rgba(251,191,36,0.7); transition:border-color .3s; }
+  .dk-bug i{ position:absolute; left:50%; top:0; width:12px; height:12px; margin-left:-6px; border-radius:50%;
+    background:var(--amber); box-shadow:0 0 0 3px rgba(251,191,36,0.25), 0 0 8px rgba(251,191,36,0.6); transition:background .3s, box-shadow .3s; }
+  .dk-bug.derecho i{ background:#4ade80; box-shadow:0 0 0 3px rgba(74,222,128,0.25), 0 0 8px rgba(74,222,128,0.6); }
+  .dk-bug.derecho::before{ border-left-color:rgba(74,222,128,0.7); }
+  .dk-rumbo-txt{ display:flex; gap:6px; font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12px; white-space:nowrap; }
+  .dk-brg{ color:var(--amber); }
+  /* Botón redondo centrado, como la rosa de rumbo. Antes se estiraba a todo el alto del
+     dock y parecía un cuadro aparte, desfasado del resto. */
+  .dk-mas{ flex:0 0 52px; width:52px; height:52px; align-self:center; margin-right:6px; border:none; border-radius:50%;
+    cursor:pointer; background:rgba(255,255,255,0.10); color:var(--text); font-family:inherit; font-size:17px;
+    font-weight:700; letter-spacing:1px; line-height:1; padding:0; }
+  .dk-mas.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
+
+  /* -- Barrita del vuelo (diseño "barrita") --
+     Arriba la línea con el avión (en % del largo); debajo, origen | aterrizás en | destino. */
+  .dk-perfil{ padding:2px 4px 12px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.10); }
+  .pf{ position:relative; height:26px; margin:0 8px; }
+  /* Lo que falta en gris; lo volado (pf-hecho) en celeste, crece hasta el avión. En las
+     puntas un punto con aro: celeste el origen, blanco el destino. */
+  .pf-linea{ position:absolute; left:0; right:0; top:50%; height:4px; margin-top:-2px; border-radius:2px;
+    background:rgba(255,255,255,0.22); }
+  .pf-linea::before, .pf-linea::after{ content:''; position:absolute; top:50%; width:10px; height:10px;
+    margin-top:-5px; border-radius:50%; z-index:1; }
+  .pf-linea::before{ left:-5px; background:#38bdf8; box-shadow:0 0 0 4px rgba(56,189,248,0.25); }
+  .pf-linea::after{ right:-5px; background:#f6f8fb; box-shadow:0 0 0 4px rgba(246,248,251,0.22); }
+  .pf-hecho{ position:absolute; left:0; top:0; bottom:0; width:0; border-radius:2px; background:#38bdf8;
+    box-shadow:0 0 10px rgba(56,189,248,0.45); transition:width .6s; }
+  /* El avión, visto desde arriba y mirando al destino (el ícono apunta al norte: 90°) */
+  .pf-avion{ position:absolute; top:50%; width:0; height:0; z-index:2; transition:left .6s; }
+  .pf-icono{ position:absolute; left:-13px; top:-13px; width:26px; height:26px; fill:#fff; transform:rotate(90deg);
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
+  .pf-pie{ display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:end; gap:14px; margin-top:4px; }
+  .dk-end{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .dk-end.to{ align-items:flex-end; text-align:right; }
+  .pf-lugar{ display:flex; align-items:baseline; gap:5px; max-width:100%; min-width:0; }
+  .pf-lugar b{ font-size:19px; font-weight:600; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .pf-lugar small{ flex:none; font-size:10.5px; font-weight:600; color:var(--text-dim); letter-spacing:.04em; }
+  /* A la altura de las ciudades, no de los km (más arriba que el resto de la fila) */
+  .pf-aterriza{ align-self:start; margin-top:7px; font-size:13.5px; font-weight:500; color:var(--text); white-space:nowrap; }
+
+  /* -- Estante (•••): lo que se toca poco -- */
+  /* El ancho deja libre la columna de la derecha (zoom, brújula, "P") a los dos lados, para
+     que quede centrado. Si no entra, baja a dos líneas. */
+  #dock-estante{ display:flex; flex-wrap:wrap; justify-content:center; align-items:stretch; gap:8px;
+    max-width:calc(100% - 2 * 84px); padding:10px; border-radius:26px; color:var(--text); }
+  #dock-estante.hidden{ display:none; }
+  .dk-ficha{ min-height:60px; display:flex; flex-direction:column; justify-content:center; gap:3px; padding:8px 14px;
+    border-radius:16px; background:rgba(255,255,255,0.07); }
+  #tile-dist{ min-width:104px; }
+  .dk-simrate{ flex-direction:row; align-items:center; gap:6px; padding:6px; }
+  .dk-simrate button{ width:44px; height:44px; border:none; border-radius:12px; cursor:pointer; background:rgba(255,255,255,0.12);
+    color:var(--text); font-family:inherit; font-size:20px; font-weight:500; }
+  .dk-sr{ display:flex; flex-direction:column; align-items:center; gap:3px; min-width:58px; }
+  #v-simrate.orange{ color:var(--orange); }
+  #time-row{ min-width:150px; max-width:210px; }
+  #time-row.con-despegue{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  #time-row:not(.con-despegue) .dk-punto, #time-row:not(.real) #s-real{ display:none; }
+  #time-row.real #s-real::before{ content:' · '; }
+  #time-row.real .dk-k, #time-row.real .dk-s{ color:#fbbf24; }
+  .dk-fuel{ min-width:190px; gap:5px; }
+  .dk-linea{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .fuel-bar{ height:6px; border-radius:3px; background:rgba(255,255,255,0.14); overflow:hidden; display:none; }
+  .fuel-fill{ display:block; height:100%; width:0%; border-radius:3px; background:#4ade80; transition:width .5s, background .5s; }
+  .dk-oculto{ display:none; }
+
+  /* iPad vertical y pantallas medianas: la guía baja a una segunda línea a lo ancho */
+  @media (max-width:1060px){
+    .dk-main{ flex-wrap:wrap; row-gap:10px; }
+    .dk-guia{ order:9; flex:1 1 100%; }
+  }
 
 
   #legend{ position:absolute; bottom:20px; left:20px; z-index:1000; border-radius:18px; color:var(--text); }
@@ -485,8 +472,14 @@
   #legend-body{ padding:2px 17px 15px; }
   #legend.collapsed #legend-body{ display:none; }
 
-  #tools{ position:absolute; top:26px; right:26px; z-index:1000; display:flex; flex-direction:column; align-items:flex-end; gap:12px; }
-  .tool-row{ display:flex; gap:6px; border-radius:22px; padding:7px; }
+  /* Barra de herramientas centrada arriba (antes iba a la derecha, encima del progreso).
+     Mismo truco de pointer-events: el contenedor no se come los toques del mapa. */
+  #toolbar{ position:absolute; top:26px; left:50%; transform:translateX(-50%); z-index:1000;
+    display:flex; flex-direction:column; align-items:center; gap:12px; pointer-events:none; }
+  #toolbar > *{ pointer-events:auto; }
+  /* gap 4 y padding 6 (antes 6 y 7): con la barra al centro, en un iPad de 1180px tiene
+     que entrar entre el panel de datos (372px) y el borde simétrico del otro lado. */
+  .tool-row{ display:flex; gap:4px; border-radius:22px; padding:6px; }
   .tool-btn{ width:46px; height:46px; border-radius:16px; border:none; cursor:pointer; background:transparent;
     color:rgba(246,248,251,0.75); font-family:inherit;
     display:flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
@@ -502,6 +495,19 @@
      alineacion de "Radio" con las etiquetas de los toggles de arriba (8 + 34 + 12 = 54px). */
   #layers{ border-radius:22px; padding:9px; width:300px; }
   #layers.hidden{ display:none; }
+  /* Menú del engranaje: luces y hora, con íconos grandes para el dedo */
+  /* Flota debajo de la barra, fuera del flujo: es más ancho que la barra, y dentro del
+     flujo la agrandaba al abrirse y la fila de botones se corría (se descentraba). */
+  #ajustes{ position:absolute; top:calc(100% + 12px); left:50%; transform:translateX(-50%); width:max-content;
+    display:flex; flex-wrap:wrap; justify-content:center; gap:8px; border-radius:22px; padding:9px; max-width:calc(100vw - 24px); }
+  #toolbar[data-orient="v"] #ajustes{ top:0; left:calc(100% + 12px); transform:none; }
+  #ajustes.hidden{ display:none; }
+  /* Añadir puntos (prendido: morado, como la ruta) y eliminar ruta (confirmando: rojo) */
+  .aj-btn.morado{ background:#a855f7; color:#fff; box-shadow:0 6px 18px rgba(168,85,247,0.4); }
+  .aj-btn.confirmar{ background:#dc2626; color:#fff; box-shadow:0 6px 18px rgba(220,38,38,0.4); }
+  .aj-btn:disabled{ opacity:.35; cursor:default; }
+  #btn-ajustes.agregando{ background:#a855f7; color:#fff; }
+  .aj-btn{ width:96px; height:76px; text-align:center; line-height:1.15; padding:0 6px; flex-direction:column; gap:6px; border-radius:16px; font-family:inherit; font-size:12px; font-weight:600; }
   .layer-opt{ display:flex; align-items:center; gap:12px; padding:8px; border-radius:12px; cursor:pointer; transition:background .15s; }
   .layer-opt:hover{ background:rgba(255,255,255,0.07); }
   .layer-opt .thumb{ width:40px; height:32px; border-radius:8px; flex:none; background-size:cover; background-position:center; border:1px solid rgba(255,255,255,0.18); }
@@ -530,7 +536,7 @@
   .ac-label.sel{ z-index:3; box-shadow:0 0 0 2px #ef4444, 0 1px 5px rgba(0,0,0,0.35); }
 
   /* ---- Tarjeta del tráfico IA (static/js/traffic.js), versión compacta (~260px de alto) ----
-     z-index 990: por DEBAJO de #tools (1000), así el menú de capas se abre encima.
+     z-index 990: por DEBAJO de la barra de arriba (1000), así el menú de capas se abre encima.
      max-height: termina arriba del botón "P", la brújula y el zoom (abajo a la derecha, ~252px). */
   #ac-card{ position:absolute; top:100px; right:26px; z-index:990; width:300px; max-height:calc(100vh - 370px);
     overflow-y:auto; border-radius:18px; padding:12px; color:var(--text); }
@@ -595,30 +601,6 @@
   .radius-row .rr-btn:hover{ background:rgba(255,255,255,0.2); }
   .radius-row #rad-val{ font-size:12px; font-weight:600; min-width:96px; text-align:center; color:#fff; white-space:nowrap; }
 
-  /* Brújula: va justo encima de los botones de zoom (que miden 102px de alto con su hueco) */
-  #compass{ position:absolute; bottom:132px; right:26px; z-index:1000; width:54px; height:54px;
-    border-radius:50%; display:flex; align-items:center; justify-content:center; cursor:pointer; }
-  #compass:hover{ filter:brightness(1.15); }
-  #compass-rose{ transition:transform .12s linear; }
-
-  /* Botón "P" del tráfico IA: encima de la brújula (132 + 54 de la brújula + 12 de hueco) */
-  #btn-parked{ position:absolute; bottom:198px; right:26px; z-index:1000; width:54px; height:54px; border-radius:50%;
-    display:flex; align-items:center; justify-content:center; cursor:pointer; color:#fff; padding:0; transition:background .15s; }
-  #btn-parked:hover{ filter:brightness(1.15); }
-  #btn-parked.on{ background:var(--amber); border-color:var(--amber); color:#1e293b; }
-
-  #zoom{ position:absolute; bottom:26px; right:26px; z-index:1000; display:flex; flex-direction:column; gap:6px; }
-  #zoom button{ width:54px; height:48px; border:1px solid var(--bar-brd); border-radius:18px; cursor:pointer;
-    background:var(--bar-bg); backdrop-filter:blur(34px) saturate(190%); -webkit-backdrop-filter:blur(34px) saturate(190%);
-    box-shadow:0 18px 44px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.35);
-    color:#fff; font-family:inherit; font-size:22px; font-weight:300; display:flex; align-items:center; justify-content:center; transition:background .15s; }
-  #zoom button:hover{ background:rgba(255,255,255,0.20); }
-
-  #bottom-center{ position:absolute; bottom:26px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; gap:10px; }
-  .chip{ border-radius:28px; padding:10px 12px 10px 18px; color:var(--text); font-size:13px; font-weight:500; display:flex; align-items:center; gap:12px; cursor:default; }
-  .chip .cv{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:14px; font-weight:500; }
-  .chip .csep{ width:1px; height:15px; background:rgba(255,255,255,0.25); }
-
   .acft-inner{ line-height:0; } .acft-inner svg{ display:block; }
   .plane-me svg{ filter:drop-shadow(0 2px 5px rgba(0,0,0,0.85)); }
   .plane-traffic svg{ filter:drop-shadow(0 1px 3px rgba(0,0,0,0.7)); }
@@ -644,6 +626,82 @@
   .maplibregl-popup-tip{ display:none; }
   .maplibregl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
   .apt-photo{ width:100%; height:auto; border-radius:9px; display:block; margin-bottom:8px; }
+
+  /* ==== Pantallas táctiles, iPad vertical y celular ====================================
+     La app se usa sobre todo desde un iPad. Todo lo de acá abajo sale de mirarla en iPad
+     (horizontal y vertical), iPad mini y celular (vertical y horizontal). */
+
+  /* En iOS el :hover se queda "pegado" después de tocar: un botón que apagaste seguía
+     iluminado, y una avería tocada quedaba en rojo aunque no estuviera rota. Sin mouse,
+     el hover vuelve a como estaba. */
+  @media (hover:none){
+    .tool-btn:hover{ background:transparent; color:rgba(246,248,251,0.75); }
+    .tool-btn.active:hover{ background:var(--amber); color:#1a1204; }
+    .tool-btn:hover svg, .btn-sq:hover svg{ transform:none; }
+    .btn-sq:hover{ background:rgba(255,255,255,0.10); color:var(--text-dim); }
+    .btn-sq.on:hover{ background:var(--amber); color:#1a1204; }
+    .pg-perfil:hover, .gp-span:hover{ background:rgba(255,255,255,0.06); color:var(--text-dim); }
+    .pg-perfil.on:hover{ background:rgba(125,211,252,0.18); color:#7dd3fc; }
+    .gp-span.on:hover{ background:rgba(56,189,248,0.18); color:#7dd3fc; }
+    .st-chip:hover{ background:rgba(255,255,255,0.08); color:var(--text-dim); }
+    .st-chip.on:hover{ background:var(--amber); color:#1a1204; }
+    .pg-pulsable:hover, .layer-opt:hover, .opt-item:hover, .sp-item:hover{ background:transparent; }
+  }
+  /* Doble toque sobre un botón hacía zoom a toda la página; "manipulation" lo saca sin
+     tocar el pellizco del mapa (eso lo maneja MapLibre en su propio canvas). Y mantener
+     pulsado un panel seleccionaba texto o abría el menú de iOS. */
+  button, .tool-btn, .btn-sq, .sw-toggle, .toggle-opt, .pg-perfil, .gp-span{ touch-action:manipulation; }
+  #dock-pila{
+    -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+
+  /* --- Celular vertical --- */
+  @media (max-width:700px){
+    /* Barra a lo ancho arriba: los botones se reparten el ancho por igual */
+    #toolbar{ top:8px; left:8px; right:8px; transform:none; align-items:stretch; gap:8px; }
+    .tool-row{ padding:4px; gap:2px; border-radius:18px; }
+    .tool-btn{ flex:1 1 0; min-width:0; width:auto; height:42px; border-radius:13px; }
+    #layers{ width:auto; align-self:flex-end; max-width:100%; }
+    /* Dock a lo ancho, más compacto: sin nombres de aeropuerto ni texto del rumbo */
+    #dock-pila{ left:8px; right:8px; bottom:8px; gap:8px; }
+    #dock{ padding:10px 10px 10px 14px; border-radius:24px; }
+    .dk-main{ gap:12px; min-height:0; }
+    .dk-hero, .dk-hero-vel{ min-width:0; }
+    .hero-v .n{ font-size:28px; }
+    .pf-lugar b{ font-size:15px; } .pf-aterriza{ font-size:12px; }
+    .dk-rumbo{ width:auto; } .dk-rosa{ width:46px; height:46px; } .dk-rumbo-txt{ display:none; }
+    .dk-llegada{ min-width:0; } .dk-eta{ font-size:20px; }
+    #graph-panel{ height:180px; border-radius:20px; }
+    #eta-toast{ top:66px; white-space:normal; max-width:calc(100vw - 16px); width:max-content;
+      text-align:center; font-size:13.5px; }
+  }
+
+  /* --- Celular horizontal: poco alto. La barra no entra al centro: va arriba a la
+     derecha, más compacta. El dock pierde el perfil del vuelo (no entra a lo alto). --- */
+  @media (max-height:500px) and (min-width:701px){
+    #dock-pila{ left:8px; right:8px; bottom:8px; gap:6px; }
+    #dock{ padding:8px 8px 8px 16px; border-radius:24px; }
+    .dk-perfil{ display:none; }
+    .dk-main{ min-height:0; }
+    .hero-v .n{ font-size:28px; }
+    #toolbar{ top:8px; left:auto; right:8px; transform:none; align-items:flex-end; gap:8px; }
+    .tool-row{ padding:4px; gap:2px; }
+    .tool-btn{ width:38px; height:38px; border-radius:12px; }
+    #eta-toast{ top:58px; }
+  }
+
+  /* ---- Barra de arriba movible (final de tools-ui.js) ----
+     Se arrastra desde su tirador, tocarlo la gira (horizontal / vertical) y mantenerlo
+     pulsado la devuelve arriba al centro. Los paneles de datos y de progreso también se
+     movían y giraban; desde el dock (2026-11-21) son solo horizontales y fijos abajo. */
+  .asa-barra{ width:30px !important; cursor:grab; touch-action:none; color:var(--text-dim); }
+  .asa-barra.agarrado{ background:var(--amber); color:#111; }
+  #toolbar.movido{ transform:none; right:auto; }
+  #toolbar[data-orient="v"]{ flex-direction:row; align-items:flex-start; }
+  #toolbar[data-orient="v"]:not(.movido){ left:14px; top:26px; transform:none; }
+  #toolbar[data-orient="v"] .tool-row{ flex-direction:column; }
+  @media (max-width:700px), (max-height:500px){
+    .asa-barra{ display:none !important; }
+  }
 
   /* ---- Modo "Terreno 3D": el pedido fue que el shader low-poly del avión/terreno también
      se sienta en los MENÚS de encima, no solo en la escena de Cesium — así todo combina.

@@ -49,12 +49,14 @@ function updatePanel(s){
     setSub('s-gs',m+Math.round(s.gs*1.852)+' km/h'); }
   // El rumbo también en magnético, para que coincida con la brújula de la cabina
   if(s.heading!=null) setOdo('v-hdg',String(Math.round(toMag(s.heading))).padStart(3,'0')+'°');
+  pintarRosa();                  // el avión de la rosa queda fijo; gira la flecha al destino
   if(s.sim_rate!=null){ const r=s.sim_rate, e=document.getElementById('v-simrate');
     if(e){ setOdo('v-simrate',(r%1===0?r:r.toFixed(2))+'×'); e.classList.toggle('orange',r>1); } }
   { const d=s.distance_nm||0;
     setOdo('v-dist',d.toFixed(1));
     txt('s-dist',nf(km(d))+' km'); }
   setOdo('v-time',fmtDur(s.elapsed_min||0));
+  pintarDespegue(s);
   if(s.fuel_gal!=null){
     setOdo('v-fuel',nf(Math.round(s.fuel_gal))+' gal');
     txt('s-fuel',nf(Math.round(s.fuel_gal*3.78541))+' L');
@@ -62,11 +64,6 @@ function updatePanel(s){
     const bar=document.getElementById('fuel-bar'), fill=document.getElementById('fuel-fill');
     if(s.fuel_capacity){ const pct=Math.max(0,Math.min(100,s.fuel_gal/s.fuel_capacity*100)); bar.style.display='block'; fill.style.width=pct+'%'; fill.style.background=pct<15?'#ef4444':pct<30?'#fb923c':'#4ade80'; }
     else bar.style.display='none'; }
-  if(s.weather){ const w=s.weather;
-    // La estación pasa a la etiqueta ("Clima real · SKRG") para que el valor quede limpio
-    txt('wx-label','Clima real'+(w.station?' · '+w.station:''));
-    txt('v-wx',(w.temp_c!=null?Math.round(w.temp_c)+'°C':'--'));
-    txt('s-wx',(w.wind_kt!=null?Math.round(w.wind_kt)+' kt':'')+(w.wind_dir!=null?' · '+Math.round(w.wind_dir)+'°':'')); }
   // El botón de luces se prende solo si hay alguna encendida
   if(s.lights){ const L=s.lights, b=document.getElementById('btn-status');
     if(b) b.classList.toggle('on',!!(L.landing||L.taxi||L.beacon||L.strobe||L.nav)); }
@@ -265,62 +262,43 @@ function planeFrame(now){
 }
 requestAnimationFrame(planeFrame);
 
-// ---- Corrimiento horizontal del avión al seguirlo ----
-// El panel de datos tapa la franja izquierda, así que podés empujar el avión hacia un
-// lado. Para dejarlo en la posición X de pantalla que querés, el centro del mapa tiene
-// que ir al lado contrario: centro = proyectar(avión) − corrimiento.
-const OFFSET_X_DEF = 120;   // solo el panel izquierdo ocupa sitio: corremos el avión a la derecha
-// Si el progreso del vuelo está abierto, los dos costados están ocupados y lo mejor es
-// dejar el avión centrado. Eso se decide solo, salvo que muevas el slider a mano.
-let offsetManual = (localStorage.getItem('offsetX')!=null)
-  ? (parseInt(localStorage.getItem('offsetX'),10) || 0) : null;
-function progresoAbierto(){
-  const el=document.getElementById('progress-panel');
-  return !!el && !el.classList.contains('hidden');
-}
+// ---- Corrimiento del avión al seguirlo ----
+// El dock de abajo tapa una franja (más alta con ruta, y más todavía con el estante o el
+// gráfico abiertos). Para que el avión quede en el medio de lo que SÍ se ve del mapa, entre
+// la barra de arriba y el dock, el centro del mapa se corre hacia abajo:
+// centro = proyectar(avión) − corrimiento. Antes el corrimiento era horizontal (120 px a la
+// derecha) porque el panel de datos tapaba la franja izquierda.
 function offsetActual(){
-  if(offsetManual!=null) return offsetManual;
-  return progresoAbierto() ? 0 : OFFSET_X_DEF;
+  const pila=document.getElementById('dock-pila');
+  const alto=map.getContainer().clientHeight;
+  if(!pila || !alto) return 0;
+  const abajo=pila.getBoundingClientRect().top;
+  // La barra solo cuenta si está arriba en su lugar (vertical o movida no tapa el centro)
+  const barra=document.getElementById('toolbar');
+  const arriba=(barra && barra.dataset.orient!=='v' && !barra.classList.contains('movido'))
+    ? barra.getBoundingClientRect().bottom : 0;
+  if(!(abajo>arriba+80)) return 0;
+  return Math.round((arriba+abajo)/2 - alto/2);      // negativo: el avión sube
 }
 // Centro de cámara para el seguimiento "clásico" (norte fijo arriba, sin Terreno 3D o sin
-// persecución activa): el punto en el suelo, corrido `off` píxeles para no quedar tapado
-// por el panel izquierdo. En modo persecución (ver CHASE_PITCH en planeFrame) esto ni se
-// usa — ahí el centro es directamente [cur.lng,cur.lat], sin proyectar/desproyectar nada.
+// persecución activa): el punto en el suelo, corrido `dy` píxeles para no quedar tapado
+// por el dock. En modo persecución (ver CHASE_PITCH en planeFrame) esto ni se usa — ahí
+// el centro es directamente [cur.lng,cur.lat], sin proyectar/desproyectar nada.
 function centroSeguir(lng,lat){
-  const off=offsetActual();
-  if(!off) return [lng,lat];
+  const dy=offsetActual();
+  if(Math.abs(dy)<2) return [lng,lat];
   const base=map.project([lng,lat]);
-  const c=map.unproject([base.x-off, base.y]);
+  const c=map.unproject([base.x, base.y-dy]);
   return [c.lng,c.lat];
-}
-function pintarOffset(){
-  const v=document.getElementById('off-val'); if(!v) return;
-  const off=offsetActual();
-  const txt = off===0 ? 'centrado' : (Math.abs(off)+' px a la '+(off>0?'derecha':'izquierda'));
-  v.textContent = txt + (offsetManual==null ? ' · automático' : '');
-  const sl=document.getElementById('off-x'); if(sl) sl.value=off;
-}
-function setOffsetX(px){
-  offsetManual=Math.max(-220,Math.min(220,Math.round(px)||0));
-  localStorage.setItem('offsetX',String(offsetManual));
-  pintarOffset();
-  recentrar();
-}
-// Vuelve al modo automático (0 con el progreso abierto, 120 con él cerrado)
-function offsetAuto(){
-  offsetManual=null;
-  localStorage.removeItem('offsetX');
-  pintarOffset();
-  recentrar();
 }
 function recentrar(){
   if(followMode && cur) map.easeTo({center:centroSeguir(cur.lng,cur.lat),duration:250});
 }
-// La llama syncProgressButton al abrir o cerrar el progreso del vuelo. Es una función
+// La llama el dock cuando cambia de alto (tools-ui.js). Es una función
 // declarada (se puede llamar desde arriba del archivo) y va con try por si alguna vez
 // se invoca antes de que este bloque termine de ejecutarse.
 function revisarCentrado(){
-  try{ if(offsetManual==null){ pintarOffset(); recentrar(); } }catch(e){}
+  try{ recentrar(); }catch(e){}
 }
 
 
@@ -527,3 +505,39 @@ function maybeFetchDestNav(){
       destAirports=d.airports||[]; destVors=d.vors||[]; renderNav(aptCenter()); })
     .catch(()=>{});
 }
+
+// ---- Hora de despegue (debajo del tiempo de vuelo) ----
+// Por defecto la hora local del SIMULADOR a la que despegaste ("despegaste 8:24 pm"): con
+// el tiempo de vuelo al lado se ve a qué hora llegás en el sim. Un toque cambia a la hora
+// REAL (la del iPad) y cuánto va durando en la vida real: con sim rate x4 son muy distintas.
+let tiempoReal=false;
+try{ tiempoReal=localStorage.getItem('tiempo.real')==='1'; }catch(e){}
+function fmtHora12(h,m){
+  return ((h%12)||12)+':'+String(m).padStart(2,'0')+(h<12?' am':' pm');
+}
+function pintarDespegue(s){
+  const row=document.getElementById('time-row'), sub=document.getElementById('time-sub');
+  const d=s && s.despegue;
+  row.classList.toggle('con-despegue',!!d);
+  row.classList.toggle('real',!!d && tiempoReal);
+  if(!d){ sub.style.display='none'; return; }
+  sub.style.display='';
+  if(tiempoReal){
+    const t=new Date(d.real*1000);
+    // Mientras volás cuenta hasta ahora; ya en tierra, hasta el toque de pista
+    const a=s.aterrizaje, fin=(a && a.t>d.real) ? a.t : Date.now()/1000;
+    txt('s-despegue','despegue real '+fmtHora12(t.getHours(),t.getMinutes()));
+    txt('s-real',fmtHm(Math.max(0,(fin-d.real)/60))+' reales');
+  } else {
+    if(d.sim_local==null){ txt('s-despegue','despegue: hora del sim desconocida'); }
+    else { const x=Math.round(d.sim_local);
+      txt('s-despegue','despegaste '+fmtHora12(Math.floor(x/3600)%24, Math.floor(x%3600/60))+' (sim)'); }
+    txt('s-real','tocá: hora real');
+  }
+}
+document.getElementById('time-row').addEventListener('click',()=>{
+  if(!(lastState && lastState.despegue)) return;
+  tiempoReal=!tiempoReal;
+  try{ localStorage.setItem('tiempo.real',tiempoReal?'1':'0'); }catch(e){}
+  pintarDespegue(lastState);
+});

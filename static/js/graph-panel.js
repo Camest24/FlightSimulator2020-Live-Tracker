@@ -8,7 +8,7 @@
 // ---- Gráfico de velocidad y altitud (estilo FR24) ----
 // El gráfico arranca abierto: es de lo que más se mira durante el vuelo y ya no tapa
 // el mapa (cuelga del panel de datos). Se cierra con su botón o con la ✕.
-let chart=null, graphOpen=true, history=[], lastGraphSample=0, lastElapsed=0;
+let chart=null, graphOpen=false, history=[], lastGraphSample=0, lastElapsed=0;
 function fmtClock(ms){ const d=new Date(ms); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function ensureChart(){
   if(chart || typeof Chart==='undefined') return;
@@ -117,13 +117,26 @@ document.getElementById('btn-progress').onclick=()=>{
   progressUserOn=!progressUserOn;
   syncProgressButton();
 };
-document.getElementById('btn-graph').onclick=()=>{
-  graphOpen=!graphOpen;
+// Abierto o cerrado se recuerda entre sesiones (Safari del iPad recarga la página seguido).
+function setGraphOpen(on){
+  graphOpen=on;
   document.getElementById('graph-panel').classList.toggle('hidden',!graphOpen);
-  document.getElementById('btn-graph').classList.toggle('active',graphOpen);
+  try{ localStorage.setItem('panel.grafico',graphOpen?'1':'0'); }catch(e){}
   if(graphOpen){ ensureChart(); refreshChart(); }
-};
-document.getElementById('gp-close').onclick=()=>{ graphOpen=false; document.getElementById('graph-panel').classList.add('hidden'); document.getElementById('btn-graph').classList.remove('active'); };
+}
+// Sin botón en la barra (2026-11-21): se abre y se cierra manteniendo pulsada la casilla
+// "Distancia" del estante del dock (•••). También se cierra con su ✕.
+alMantenerPulsado(document.getElementById('tile-dist'), ()=>setGraphOpen(!graphOpen));
+document.getElementById('gp-close').onclick=()=>setGraphOpen(false);
+// Arranca CERRADO (2026-11-21): con la hora de despegue en el panel ya casi no se usa y
+// le roba lugar al mapa. Solo se abre al cargar si la última vez lo dejaste abierto.
+let graficoGuardado=null;
+try{ graficoGuardado=localStorage.getItem('panel.grafico'); }catch(e){}
+if(graficoGuardado==='1') setGraphOpen(true);
+else {
+  graphOpen=false;
+  document.getElementById('graph-panel').classList.add('hidden');
+}
 
 // ---- Controles para recorrer el gráfico ----
 (function(){
@@ -178,4 +191,15 @@ document.getElementById('gp-close').onclick=()=>{ graphOpen=false; document.getE
 ensureChart(); refreshChart();
 
 // ---- Modo "agregar punto de ruta" ----
-document.getElementById('rc-addwp').onclick=()=>setAddWp(!addWpMode);
+// Desde el engranaje (2026-11-21; antes fue el ＋ morado de un chip y después un ícono de
+// punto en el dock): "Añadir puntos" lo prende y cada toque en el mapa agrega uno; el mismo
+// botón ("Terminar puntos") lo apaga.
+(function(){
+  const b=document.getElementById('btn-agregar-puntos'); if(!b) return;
+  b.addEventListener('click',()=>{
+    if(!routeTarget) return;
+    if(addWpMode){ setAddWp(false); return; }
+    setAddWp(true);
+    showToast('Tocá el mapa para agregar puntos · ⚙ → Terminar puntos para terminar');
+  });
+})();

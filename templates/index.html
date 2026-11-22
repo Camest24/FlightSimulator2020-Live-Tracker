@@ -15,17 +15,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/main.css">
-<script>
-  // Aplicamos el tamaño guardado ANTES de pintar, para que no se vea el salto. Va suelto
-  // y envuelto en try: si algo falla acá, no puede arrastrar al script principal.
-  try{
-    var _d={'--ui-izq':['uiScaleIzq',1], '--ui-der':['uiScaleDer',0.9]};
-    for(var _v in _d){
-      var _k=parseFloat(localStorage.getItem(_d[_v][0]));
-      document.documentElement.style.setProperty(_v, String(_k>=0.6 && _k<=1.3 ? _k : _d[_v][1]));
-    }
-  }catch(e){}
-</script>
 </head>
 <body>
 <div id="map"></div>
@@ -59,50 +48,15 @@
 <!-- Solo aparece cuando el server arrancó con --debug (avión de mentira, ver app.py). -->
 <div id="debug-badge" class="hidden">DEBUG</div>
 
-<div id="left-stack">
-  <div id="panel" class="glass">
-    <div class="hero">
-      <div class="hero-cell">
-        <span class="hero-k">Altitud</span>
-        <span class="hero-v"><span class="n" id="v-alt">--</span><span class="u">ft</span></span>
-        <span class="hero-sub" id="v-vs">--</span>
-      </div>
-      <div class="hero-cell">
-        <span class="hero-k">Velocidad</span>
-        <span class="hero-v"><span class="n" id="v-gs">--</span><span class="u">kt</span></span>
-        <span class="hero-sub" id="s-gs">--</span>
-      </div>
-    </div>
-
-    <div class="tiles">
-      <span class="tile"><span class="tile-k">Rumbo</span><span class="tile-v" id="v-hdg">--</span></span>
-      <span class="tile"><span class="tile-k">Distancia</span><span class="tile-v"><span id="v-dist">--</span><span class="uu">NM</span></span><span class="tile-sub" id="s-dist"></span></span>
-      <span class="tile"><span class="tile-k">Sim rate</span><span class="tile-v" id="v-simrate">1×</span>
-        <span class="tile-steps">
-          <button id="sr-plus" title="Subir velocidad de simulación">+</button>
-          <button id="sr-minus" title="Bajar velocidad de simulación">−</button>
-        </span></span>
-    </div>
-
-    <div class="krow"><div class="krow-line"><span class="krow-k">Tiempo de vuelo</span><span class="krow-v" id="v-time">00:00:00</span></div></div>
-
-    <div class="krow">
-      <div class="krow-line"><span class="krow-k">Combustible</span><span class="krow-v" id="v-fuel">--</span></div>
-      <div class="fuel-bar" id="fuel-bar"><span class="fuel-fill" id="fuel-fill"></span></div>
-      <div class="krow-sub"><span id="s-fuel"></span><span id="s-endur"></span></div>
-    </div>
-
-    <div class="krow"><div class="krow-line"><span class="krow-k" id="wx-label">Clima real</span>
-      <span class="wx-v"><span class="krow-v" id="v-wx">--</span><span class="wx-sub" id="s-wx"></span></span></div></div>
-
-    <div class="panel-foot">
-      <button id="btn-status" class="btn-sq" title="Luces del avión"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.6l.1.6h5.2l.1-.6c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3z"/></svg></button>
-      <button id="btn-time" class="btn-sq" title="Hora del simulador"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></button>
-      <button class="btn" id="btn-reset"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Reiniciar ruta</button>
-    </div>
-  </div>
-
-  <div id="graph-panel" class="glass">
+<!-- ==== Dock de abajo (rediseño 2026-11-21) ====
+     Variante "1c" de Claude Design (un dock estilo iPadOS) + la barra con el perfil del vuelo
+     de la "1d". Reemplaza a los dos paneles de antes (datos a la izquierda, progreso a la
+     derecha), que se podían mover y girar: el dock es solo horizontal y queda fijo abajo.
+     Los IDs de adentro son los mismos de antes, así telemetry.js y flight-progress.js los
+     siguen llenando igual. De abajo hacia arriba: el dock, el estante (lo que se toca poco,
+     se abre con •••) y el gráfico de velocidad y altitud (mantener pulsada "Distancia"). -->
+<div id="dock-pila">
+  <div id="graph-panel" class="glass hidden">
   <div class="gp-head"><span>Velocidad y altitud</span><span id="gp-close">✕</span></div>
   <div class="gp-body"><canvas id="graph-canvas"></canvas></div>
   <div class="gp-nav">
@@ -116,26 +70,124 @@
     <span id="gp-rango">—</span>
   </div>
 </div>
+
+  <div id="dock-estante" class="glass">
+    <div class="dk-ficha tile-pulsable" id="tile-dist" title="Mantené pulsado para ver el gráfico de velocidad y altitud">
+      <span class="dk-k">Distancia</span>
+      <span class="dk-v"><span id="v-dist">--</span><span class="uu">NM</span></span>
+      <span class="dk-s" id="s-dist"></span>
+    </div>
+    <div class="dk-ficha dk-simrate">
+      <button id="sr-minus" title="Bajar velocidad de simulación">−</button>
+      <span class="dk-sr"><span class="dk-k">Sim rate</span><span class="dk-v" id="v-simrate">1×</span></span>
+      <button id="sr-plus" title="Subir velocidad de simulación">+</button>
+    </div>
+    <!-- Tocar la ficha alterna la hora de despegue: la del simulador o la de la vida real -->
+    <div class="dk-ficha" id="time-row">
+      <span class="dk-k">Tiempo de vuelo<i class="dk-punto"></i></span>
+      <span class="dk-v" id="v-time">00:00:00</span>
+      <span class="dk-s" id="time-sub" style="display:none"><span id="s-despegue"></span><span id="s-real"></span></span>
+    </div>
+    <div class="dk-ficha dk-fuel">
+      <span class="dk-linea"><span class="dk-k">Combustible</span><span class="dk-v" id="v-fuel">--</span></span>
+      <div class="fuel-bar" id="fuel-bar"><span class="fuel-fill" id="fuel-fill"></span></div>
+      <span class="dk-linea dk-s"><span id="s-fuel"></span><span id="s-endur"></span></span>
+    </div>
+    <!-- Próximo punto: ya no se muestra (agregar puntos y borrar la ruta pasaron al
+         engranaje, 2026-11-21), pero updateNextLeg() sigue llenando estos campos. -->
+    <div id="pg-next-row" class="dk-oculto"><span id="pg-next"></span><span id="pg-next-nm"></span><span id="pg-next-min"></span><span class="flecha-rumbo" id="fr-next"><svg viewBox="0 0 24 24"><path d="M12 2.5l6.5 17-6.5-4.2-6.5 4.2z"/></svg></span><span id="pg-next-brg"></span><span id="pg-next-km"></span><span id="pg-next-card"></span><span id="pg-next-fill"></span></div>
+  </div>
+
+  <div id="dock" class="glass">
+    <!-- Perfil del vuelo (de la variante 1d): subida, crucero y bajada a escala de la ruta, con
+         el avión a su altura real. Solo con ruta. Lo dibuja pintarPerfil() en flight-progress.js. -->
+    <!-- Barrita del vuelo (diseño "barrita", 2026-11-21): una línea del origen al destino
+         con el avión encima y, debajo, las dos ciudades (de los datos de OurAirports, sin
+         consultas extra), lo recorrido, lo que falta y en cuánto aterrizás. Antes tuvo el
+         perfil de altura y después la línea con T/C, T/D y puntos de ruta: se simplificó. -->
+    <div class="dk-perfil solo-ruta" id="dk-perfil">
+      <div class="pf" id="pf">
+        <div class="pf-linea"><div class="pf-hecho" id="pf-hecho"></div></div>
+        <div class="pf-avion" id="pf-avion"><svg class="pf-icono" viewBox="0 0 24 24"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg></div>
+      </div>
+      <div class="pf-pie">
+        <div class="dk-end"><span class="pf-lugar"><b id="pg-from-name">--</b><small id="pg-from">----</small></span><span class="dk-s" id="pg-done"></span></div>
+        <span class="pf-aterriza" id="pf-aterriza"></span>
+        <div class="dk-end to"><span class="pf-lugar"><small id="pg-to">----</small><b id="pg-to-name">--</b></span><span class="dk-s" id="pg-left"></span></div>
+      </div>
+    </div>
+
+    <div class="dk-main">
+      <div class="dk-hero">
+        <span class="hero-k">Altitud</span>
+        <span class="hero-v"><span class="n" id="v-alt">--</span><span class="u">ft</span></span>
+        <span class="hero-sub" id="v-vs">--</span>
+      </div>
+      <div class="dk-hero dk-hero-vel">
+        <span class="hero-k">Velocidad</span>
+        <span class="hero-v"><span class="n" id="v-gs">--</span><span class="u">kt</span></span>
+        <span class="hero-sub" id="s-gs">--</span>
+      </div>
+      <div class="dk-sep solo-ruta"></div>
+      <!-- Tocar cambia entre la hora del simulador y la hora real (puntito celeste) -->
+      <div class="dk-llegada solo-ruta pg-tocable" id="pg-eta-row" title="Tocá para cambiar entre hora del simulador y hora real">
+        <span class="dk-k"><span id="pg-eta-k">Llegada (hora sim)</span><i class="dk-punto"></i></span>
+        <span class="dk-eta" id="pg-eta">--:--</span>
+        <span class="dk-s" id="pg-eta-en"></span>
+      </div>
+      <div class="dk-guia solo-ruta">
+        <div class="pg-brg" id="pg-vnav-row"><span class="pg-k">Crucero</span><span class="pg-vwrap"><span class="pg-v" id="pg-vnav">--</span><button type="button" class="pg-tabla-btn" id="pg-tabla-btn" title="Ver tabla completa de descenso">▤</button></span></div>
+        <div class="pg-brg" id="pg-vs-row"><span class="pg-k">Bajar</span><span class="pg-v" id="pg-vs">--</span></div>
+        <div class="pg-brg" id="pg-spd-row"><span class="pg-k">Velocidad</span><span class="pg-v" id="pg-spd">--</span></div>
+      </div>
+      <!-- Rumbo: el avión fijo con la nariz arriba y, en el borde, el punto ámbar del destino
+           respecto de la nariz (solo con ruta; verde si vas derecho). Lo gira pintarRosa. -->
+      <div class="dk-rumbo">
+        <div class="dk-rosa">
+          <span class="flecha-rumbo dk-hdg" id="fr-hdg"><svg viewBox="0 0 24 24"><path d="M12 2.5l6.5 17-6.5-4.2-6.5 4.2z"/></svg></span>
+          <span class="dk-bug solo-ruta" id="fr-brg"><i></i></span>
+        </div>
+        <span class="dk-rumbo-txt"><span id="v-hdg">--</span><span class="dk-brg solo-ruta">→ <span id="pg-brg">---°</span></span></span>
+      </div>
+      <button type="button" id="dk-mas" class="dk-mas" title="Más: distancia, sim rate, tiempo, combustible, luces y hora">•••</button>
+    </div>
+  </div>
 </div>
 
-<div id="tools">
+<!-- Barra de herramientas centrada arriba, con el menú de capas colgando debajo. Antes
+     vivía en la columna derecha (#tools), junto al progreso del vuelo. -->
+<div id="toolbar">
   <div class="tool-row glass bar">
+    <!-- Tirador: arrastrar mueve la barra, tocar la gira (horizontal/vertical), mantener
+         pulsado la devuelve arriba al centro. -->
+    <button class="tool-btn asa-barra" id="btn-asa-barra" title="Arrastrá para mover · tocá para girar · mantené pulsado para volver al centro"><svg width="14" height="20" viewBox="0 0 14 20" fill="currentColor"><circle cx="4" cy="4" r="1.7"/><circle cx="10" cy="4" r="1.7"/><circle cx="4" cy="10" r="1.7"/><circle cx="10" cy="10" r="1.7"/><circle cx="4" cy="16" r="1.7"/><circle cx="10" cy="16" r="1.7"/></svg></button>
     <button class="tool-btn" id="btn-layers" title="Capas"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5M2 12l10 5 10-5"/></svg></button>
     <button class="tool-btn active" id="btn-center" title="Seguir al avión"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke-linecap="round"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg></button>
     <button class="tool-btn active" id="btn-3d" title="Vista 2D / 3D" style="font-weight:700;font-size:12.5px;">3D</button>
     <button class="tool-btn disabled" id="btn-progress" title="Progreso del vuelo (necesita una ruta)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-6 3 12 3-6h5"/></svg></button>
-    <button class="tool-btn" id="btn-fail" title="Averías"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg></button>
     <button class="tool-btn" id="btn-hist" title="Historial de vuelos"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/></svg></button>
-    <button class="tool-btn active" id="btn-graph" title="Gráfico de velocidad y altitud"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M6 15l4-5 3 3 5-7"/></svg></button>
+    <!-- El gráfico de velocidad y altitud ya no tiene botón: se abre manteniendo pulsada la
+         ficha "Distancia" del estante del dock (graph-panel.js). -->
     <button class="tool-btn" id="btn-search" title="Buscar aeropuerto"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></button>
+    <!-- Engranaje: luces y hora del simulador (antes eran botones del panel de datos y
+         después del estante del dock; se pasaron acá el 2026-11-21 para dejar el dock limpio),
+         mostrar los aviones parqueados (antes el botón "P" de al lado de la brújula), y
+         añadir puntos / eliminar la ruta (antes un ícono de punto en el dock). -->
+    <button class="tool-btn" id="btn-ajustes" title="Luces, hora, parqueados y la ruta"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
     <button class="tool-btn" id="btn-msfsplan" title="Traer el plan de vuelo del mapa de MSFS"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/></svg></button>
   </div>
+  <div id="ajustes" class="glass hidden">
+    <button id="btn-status" class="btn-sq aj-btn" title="Luces del avión"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.6l.1.6h5.2l.1-.6c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3z"/></svg><span>Luces</span></button>
+    <button id="btn-time" class="btn-sq aj-btn" title="Hora del simulador"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>Hora</span></button>
+    <!-- Tráfico IA: mostrar/ocultar los estacionados apagados (ver static/js/traffic.js) -->
+    <button id="btn-parked" class="btn-sq aj-btn" title="Mostrar aviones estacionados y apagados"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M10 17V7h3.5a3 3 0 0 1 0 6H10"/></svg><span>Mostrar parqueados</span></button>
+    <!-- Con ruta: agregar puntos tocando el mapa, y borrar la ruta (dos toques: el primero
+         pide confirmar). Sin ruta quedan apagados. -->
+    <button id="btn-agregar-puntos" class="btn-sq aj-btn aj-ruta" title="Agregar puntos a la ruta tocando el mapa"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.8" fill="currentColor" stroke="none"/></svg><span>Añadir puntos</span></button>
+    <button id="btn-borrar-ruta" class="btn-sq aj-btn aj-ruta" title="Eliminar la ruta (pide confirmar)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg><span>Eliminar ruta</span></button>
+  </div>
   <div id="layers" class="glass hidden">
-    <div class="layer-opt sel" data-layer="satlabels"><span class="thumb" style="background-image:url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/9/230/143)"></span><span class="name">Satélite con nombres</span><span class="radio"></span></div>
-    <div class="layer-opt" data-layer="satellite"><span class="thumb" style="background-image:url(https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/9/231/143)"></span><span class="name">Satélite</span><span class="radio"></span></div>
-    <div class="layer-opt" data-layer="street"><span class="thumb" style="background-image:url(https://basemaps.cartocdn.com/rastertiles/voyager/9/143/230.png)"></span><span class="name">Mapa de calles</span><span class="radio"></span></div>
-    <div class="layer-opt" data-layer="dark"><span class="thumb" style="background-image:url(https://basemaps.cartocdn.com/rastertiles/dark_all/9/143/230.png)"></span><span class="name">Mapa oscuro</span><span class="radio"></span></div>
-    <div class="divider"></div>
+    <!-- El selector de mapa base se sacó: solo queda satélite con nombres (ver map-setup.js). -->
     <!-- Aeropuertos y VOR quedaron fijos siempre activados (antes eran togglables acá).
          Este slot ahora es "Grids": retícula de coordenadas + eje de pista extendido para
          el destino elegido, pensado para planear rutas a mano sin perder la referencia. -->
@@ -152,54 +204,11 @@
       por <a href="https://sketchfab.com/fDlruosne" target="_blank" rel="noopener" style="color:inherit;">Dlourine</a>, CC-BY 4.0.
     </div>
   </div>
-
-  <div id="progress-panel" class="glass hidden">
-    <div class="panel-head" id="pg-head">
-      <span class="logo"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-6 3 12 3-6h5"/></svg></span>
-      <h1>Progreso del vuelo</h1>
-      <svg id="pg-caret" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9h14M5 15h14"/></svg>
-    </div>
-    <div class="pg-body">
-      <div class="pg-ends">
-        <span class="pg-end from"><span class="pg-icao" id="pg-from">----</span><span class="pg-city" id="pg-from-name"></span></span>
-          <span class="pg-mid"><span class="pg-plane-badge" id="pg-badge" title="Fase del vuelo"><svg id="pg-badge-icon" width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M21 16v-2l-8-5V3.5C13 2.67 12.33 2 11.5 2S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16z"/></svg></span></span>
-        <span class="pg-end to"><span class="pg-icao" id="pg-to">----</span><span class="pg-city" id="pg-to-name"></span></span>
-      </div>
-      <div class="pg-track"><span class="pg-fill" id="pg-fill"></span></div>
-      <div class="pg-nums"><span id="pg-done"></span><span id="pg-left"></span></div>
-      <div class="pg-rows">
-        <div class="pg-brg"><span class="pg-k">Rumbo a seguir</span><span class="pg-v amber" id="pg-brg">---°</span></div>
-        <div class="pg-brg"><span class="pg-k">Llegada estimada</span><span class="pg-v" id="pg-eta">--:--</span></div>
-        <div class="pg-brg" id="pg-vnav-row"><span class="pg-k">Inicio del descenso</span><span class="pg-vwrap"><button type="button" class="pg-tabla-btn" id="pg-tabla-btn" title="Ver tabla completa de descenso">▤</button><span class="pg-v" id="pg-vnav">--</span></span></div>
-        <div class="pg-brg" id="pg-vs-row"><span class="pg-k">Bajar a</span><span class="pg-v" id="pg-vs">--</span></div>
-        <div class="pg-brg" id="pg-spd-row"><span class="pg-k">Velocidad</span><span class="pg-v" id="pg-spd">--</span></div>
-      </div>
-      <div id="pg-next-row" class="pg-next">
-        <div class="pg-next-head"><span class="pg-next-k">Próximo punto</span><span class="pg-next-name" id="pg-next">--</span></div>
-        <div class="pg-next-track"><span class="pg-next-fill" id="pg-next-fill"></span></div>
-        <div class="pg-next-nums">
-          <span class="pg-nx"><b><span id="pg-next-nm">--</span><em>NM</em></b><i id="pg-next-km">-- km</i></span>
-          <span class="pg-nx"><b><span id="pg-next-min">--</span><em>min</em></b><i>a esa velocidad</i></span>
-          <span class="pg-nx"><b><span id="pg-next-brg">---°</span></b><i id="pg-next-card">rumbo</i></span>
-        </div>
-      </div>
-    </div>
-  </div>
 </div>
 
-<div id="compass" class="glass bar" title="Volver al norte">
-  <svg id="compass-rose" width="36" height="36" viewBox="0 0 32 32">
-    <circle cx="16" cy="16" r="14" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1"/>
-    <path d="M16 5 L20 17 L16 15 L12 17 Z" fill="#ef4444"/>
-    <path d="M16 27 L12 15 L16 17 L20 15 Z" fill="#ffffff"/>
-    <text x="16" y="4.2" text-anchor="middle" font-family="Archivo,sans-serif" font-size="6.5" font-weight="700" fill="#fff">N</text>
-  </svg>
-</div>
-<div id="zoom"><button id="zin">+</button><button id="zout">−</button></div>
-<!-- Tráfico IA: mostrar/ocultar los estacionados apagados (ver static/js/traffic.js) -->
-<button id="btn-parked" class="glass bar" title="Mostrar aviones estacionados y apagados">
-  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M10 17V7h3.5a3 3 0 0 1 0 6H10"/></svg>
-</button>
+<!-- La brújula y los botones de zoom (abajo a la derecha) se sacaron el 2026-11-21: en
+     el iPad se hace con los dedos. El botón "P" de los estacionados pasó al engranaje. -->
+
 
 
 
@@ -215,24 +224,8 @@
 </div>
 
 
-<div id="fail-modal" class="hidden">
-  <div class="fail-card glass">
-    <div class="ed-head"><span>Averías</span><span id="fail-close">✕</span></div>
-    <button id="fail-repair" class="fail-repair" title="Repara todo lo que esté roto y cancela lo programado">Reparar todo</button>
-    <div class="fail-when">
-      <span class="fail-k">Cuándo</span>
-      <div class="fail-ctrl">
-        <button class="fail-mode on" data-min="0">Ya</button>
-        <button class="fail-mode" data-min="1">1 min</button>
-        <button class="fail-mode" data-min="5">5 min</button>
-        <button class="fail-mode" data-min="15">15 min</button>
-        <input id="fail-min" type="number" min="0" max="600" placeholder="min">
-      </div>
-    </div>
-    <div id="fail-body"></div>
-    <div id="fail-queue"></div>
-  </div>
-</div>
+<!-- Averías: se sacaron (2026-11-21). En la práctica no hacían nada en los vuelos (los
+     eventos TOGGLE_*_FAILURE no tenían efecto visible) y nunca se usaron. -->
 
 <div id="opts-modal" class="hidden">
   <div class="rt-card glass">
@@ -249,30 +242,26 @@
   </div>
 </div>
 
+<!-- Resumen al terminar el vuelo: se abre solo cuando el backend lo archiva (ver
+     avisarGuardado en tools-ui.js). -->
+<div id="resumen-modal" class="hidden">
+  <div class="st-card glass">
+    <div class="ed-head"><span>Vuelo terminado</span><span id="rs-close">✕</span></div>
+    <div id="rs-body"></div>
+  </div>
+</div>
+
 <div id="status-modal" class="hidden">
   <div class="st-card glass">
-    <div class="ed-head"><span>Luces y vista</span><span id="st-close">✕</span></div>
-    <div class="off-box">
-      <div class="off-top"><span class="off-k">Centrado del avión</span><span class="off-v" id="off-val">centrado</span></div>
-      <input id="off-x" type="range" min="-220" max="220" step="10" value="120">
-      <div class="off-scale"><span>izquierda</span><button id="off-reset" class="off-reset" title="Centrado según los paneles que tengas abiertos">automático</button><span>derecha</span></div>
-    </div>
-    <div class="off-box">
-      <div class="off-top"><span class="off-k">Tamaño de los paneles</span></div>
-      <div class="ui-row"><span class="ui-k">Datos</span>
-        <input id="ui-izq" type="range" min="0.6" max="1.3" step="0.1" value="1">
-        <span class="ui-v" id="ui-izq-val">100%</span></div>
-      <div class="ui-row"><span class="ui-k">Progreso</span>
-        <input id="ui-der" type="range" min="0.6" max="1.3" step="0.1" value="0.9">
-        <span class="ui-v" id="ui-der-val">90%</span></div>
-      <div class="off-scale"><span>60%</span><button id="ui-reset" class="off-reset" title="Datos 100%, progreso 90%">por defecto</button><span>130%</span></div>
-    </div>
+    <div class="ed-head"><span>Luces</span><span id="st-close">✕</span></div>
+    <!-- "Centrado del avión" y "Tamaño de los paneles" se sacaron (2026-11-21): nunca se
+         usaron. El centrado es siempre el automático (offsetActual en telemetry.js). -->
     <div id="st-body"></div>
   </div>
 </div>
 
-<!-- Tabla de descenso completa. Se abre manteniendo pulsada la fila de altura o la de
-     velocidad en el panel de progreso (que ya muestran el dato de esta misma tabla). -->
+<!-- Tabla de descenso completa. Se abre con el botón ▤ o manteniendo pulsada la fila de
+     crucero/altura o la de velocidad del dock (que ya muestran el dato de esta tabla). -->
 <div id="tabla-modal" class="hidden">
   <div class="st-card glass" id="tabla-card">
     <div class="ed-head"><span>Tabla de descenso</span><span id="tabla-close">✕</span></div>
@@ -295,7 +284,7 @@
 
 <div id="time-modal" class="hidden">
   <div class="gw-card glass">
-    <div class="gw-title">Hora del simulador (Zulu/UTC)</div>
+    <div class="gw-title" id="tm-title">Hora del simulador</div>
     <div class="tm-row">
       <label class="lp-lbl">Hora<input type="number" class="lp-input" id="tm-h" min="0" max="23" value="12"></label>
       <label class="lp-lbl">Min<input type="number" class="lp-input" id="tm-m" min="0" max="59" value="0"></label>
@@ -308,9 +297,8 @@
   </div>
 </div>
 
-<div id="bottom-center">
-  <div class="chip glass bar" id="route-chip" style="display:none;"><button id="rc-addwp" class="rc-btn">＋ punto</button><button id="rc-mcdu" class="rc-btn rc-mcdu" title="Guardar como company route para cargarla desde el MCDU">→ MCDU</button><button class="rc-btn rc-x" onclick="clearRoute()" title="Quitar la ruta">✕</button></div>
-</div>
+<!-- El chip de la ruta (＋ punto, ✕ cancelar vuelo) se sacó el 2026-11-21: las dos cosas
+     viven en el ícono de punto del estante del dock (1 toque / 2 toques). -->
 
 <div id="eta-toast" class="glass hidden"><span id="eta-text"></span></div>
 

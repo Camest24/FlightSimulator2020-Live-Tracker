@@ -86,56 +86,6 @@ map.on('touchmove', cancelLongPress);
 map.on('dragstart', cancelLongPress);
 map.on('zoomstart', cancelLongPress);
 
-// Cabecera del panel: un clic lo pliega/despliega, arrastrarla lo suelta del stack izquierdo.
-(function(){
-  const panel=document.getElementById('progress-panel'), head=document.getElementById('pg-head');
-  if(!panel||!head) return;
-  const stack=document.getElementById('tools');   // su lugar natural: columna de la derecha
-  let dragging=false, moved=false, startX=0, startY=0, offX=0, offY=0;
-
-  function startDrag(cx,cy){
-    const r=panel.getBoundingClientRect();
-    dragging=true; moved=false;
-    startX=cx; startY=cy; offX=cx-r.left; offY=cy-r.top;
-  }
-  function moveDrag(cx,cy){
-    if(!dragging) return;
-    if(!moved){
-      if(Math.abs(cx-startX)+Math.abs(cy-startY)<4) return;   // umbral: clic vs arrastre
-      moved=true;
-      // Lo sacamos del stack y lo colgamos del body: dentro del stack, position:fixed
-      // no se despega bien y el panel quedaba clavado.
-      const r=panel.getBoundingClientRect();
-      document.body.appendChild(panel);
-      panel.classList.add('floating');
-      panel.style.left=r.left+'px'; panel.style.top=r.top+'px';
-    }
-    // offsetWidth/Height ignoran el scale. Leemos la escala del propio CSS (no de una
-    // variable JS) para que esto funcione sin depender del orden en que carga nada.
-    const k=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-der'))||1;
-    const w=panel.offsetWidth*k, h=panel.offsetHeight*k;
-    let x=Math.max(0,Math.min(window.innerWidth-w, cx-offX));
-    let y=Math.max(0,Math.min(window.innerHeight-h, cy-offY));
-    panel.style.left=x+'px'; panel.style.top=y+'px';
-  }
-  // La cabecera solo arrastra. Abrir y cerrar es exclusivo del botón de la barra de
-  // herramientas: tener dos mecanismos (plegar + ocultar) se pisaba entre sí.
-  function endDrag(){ dragging=false; }
-  head.addEventListener('mousedown',e=>{ startDrag(e.clientX,e.clientY); e.preventDefault(); });
-  window.addEventListener('mousemove',e=>moveDrag(e.clientX,e.clientY));
-  window.addEventListener('mouseup',endDrag);
-  head.addEventListener('touchstart',e=>{ const t=e.touches[0]; startDrag(t.clientX,t.clientY); },{passive:true});
-  window.addEventListener('touchmove',e=>{ if(dragging){ const t=e.touches[0]; moveDrag(t.clientX,t.clientY); } },{passive:true});
-  window.addEventListener('touchend',endDrag);
-
-  head.addEventListener('dblclick',()=>{                 // doble clic: volver a la columna izquierda
-    if(!panel.classList.contains('floating')) return;
-    panel.classList.remove('floating');
-    panel.style.left=''; panel.style.top='';
-    if(stack) stack.appendChild(panel);   // vuelve debajo de la barra de herramientas
-  });
-})();
-
 // ---- Plan de vuelo armado en el mapa del mundo de MSFS (pre-partida) ----
 // El backend lee CustomFlight.PLN. Si el juego trae un destino y vos todavía no
 // pusiste una ruta propia, la app la adopta sola.
@@ -171,6 +121,7 @@ function checkMsfsPlan(manual){
     routeWaypoints.forEach(w=>w.marker.remove()); routeWaypoints=[];
     routeTarget={lat:p.dest_lat, lon:p.dest_lon, icao:p.destination, pista:null};
     msfsPlanAuto=!manual;
+    cruceroPlan=p.cruise_alt||null;     // altura de crucero del plan: base del T/C y T/D
 
     // El plan trae los puntos intermedios: los metemos como puntos de ruta propios.
     // El backend los devuelve en `waypoints`, con el nombre en `id`.
@@ -266,7 +217,7 @@ function addWaypoint(lng,lat,name,append){
 function aplicarRuta(icao, lat, lon, pts){
   clearRoute();
   routeTarget={lat:lat, lon:lon, icao:icao};
-  msfsPlanAuto=false;
+  msfsPlanAuto=false; cruceroPlan=null;
   (pts||[]).forEach(w=>addWaypoint(w.lon, w.lat, w.id, true));
   drawRoute();
 }
@@ -360,7 +311,7 @@ window.planRoute=function(btn,lat,lon,icao){
 // para poder trazar el eje extendido del toggle "Grids".
 function fijarDestino(lat,lon,icao,pista,hdg){
   routeTarget={lat:lat, lon:lon, icao:icao, pista:pista||null, hdg:(hdg==null?null:hdg)};
-  msfsPlanAuto=false;
+  msfsPlanAuto=false; cruceroPlan=null;
   drawRoute();
   updateGrids();
 }
@@ -422,12 +373,17 @@ window.irAPista=function(icao,ri,end){
 };
 window.clearRoute=function(){ routeTarget=null; routeWaypoints.forEach(w=>w.marker.remove()); routeWaypoints=[];
   if(map.getSource('planroute')) map.getSource('planroute').setData({type:'FeatureCollection',features:[]});
-  document.getElementById('route-chip').style.display='none';
-  originApt=null; originRefKey=null; msfsPlanAuto=false;
-  progressUserOn=false; syncProgressButton();     // vuelve a bloquear el botón y oculta el panel
+  originApt=null; originRefKey=null; msfsPlanAuto=false; cruceroPlan=null;
+  // Bloquea el botón y esconde lo del progreso; la próxima ruta se vuelve a ver sola
+  progressUserOn=true; syncProgressButton();
   if(typeof closePointMenu==='function') closePointMenu();
   setAddWp(false); updateGrids(); };
-function setAddWp(on){ addWpMode=on; const b=document.getElementById('rc-addwp'); if(b){ b.textContent=on?'Listo':'＋ punto'; b.classList.toggle('on',on); } }
+// Modo "agregar punto de ruta": se prende desde el engranaje. Mientras dura, el engranaje
+// y su botón quedan morados, y el botón dice "Terminar puntos".
+function setAddWp(on){ addWpMode=on;
+  const b=document.getElementById('btn-agregar-puntos'), g=document.getElementById('btn-ajustes');
+  if(b){ b.classList.toggle('morado',on); b.querySelector('span').textContent=on?'Terminar puntos':'Añadir puntos'; }
+  if(g) g.classList.toggle('agregando',on); }
 function doTeleport(lat,lon,alt,hdg,spd,gear,waitGear,eng0){
   let q='/api/teleport?lat='+lat+'&lon='+lon;
   if(alt!=null && !isNaN(alt)) q+='&alt='+alt;
@@ -452,23 +408,51 @@ function startGearWait(go){
   }, 300);
 }
 // Control de hora del sim (beta) — el clima real por ahora se sigue ajustando desde MSFS.
+// Se trabaja en la HORA LOCAL de donde está el avión (en Colombia, UTC−5), que es la que
+// importa para saber si es de día o de noche. El sim solo deja cambiar la hora Zulu, así
+// que se convierte. Antes el cuadro mostraba la hora local pero la mandaba como Zulu: en
+// Colombia quedaba corrida 5 horas.
+// El huso sale del propio sim (hora local − hora Zulu), así que respeta los husos reales
+// (España va en UTC+1 aunque esté al oeste de Greenwich) sin que la app tenga que saberlos.
+function husoSimSeg(){
+  const s=lastState||{};
+  if(s.local_time==null || s.zulu_time==null) return null;
+  let d=Math.round((s.local_time-s.zulu_time)/900)*900;      // los husos van de a 15 min
+  if(d>14*3600) d-=86400;
+  if(d<-12*3600) d+=86400;
+  return d;
+}
+function fmtHuso(seg){
+  if(!seg) return 'UTC';
+  const h=Math.floor(Math.abs(seg)/3600), m=Math.round(Math.abs(seg)%3600/60);
+  return 'UTC'+(seg<0?'−':'+')+h+(m?':'+String(m).padStart(2,'0'):'');
+}
 (function(){
   const modal=document.getElementById('time-modal');
   const btn=document.getElementById('btn-time');
   if(!modal||!btn) return;
   btn.onclick=()=>{
-    if(lastState&&lastState.local_time!=null){
-      const secs=Math.round(lastState.local_time);
+    const huso=husoSimSeg();
+    const s=lastState||{};
+    const base = huso!=null ? s.local_time : s.zulu_time;     // sin huso conocido, en Zulu
+    if(base!=null){
+      const secs=Math.round(base);
       document.getElementById('tm-h').value=Math.floor(secs/3600)%24;
       document.getElementById('tm-m').value=Math.floor((secs%3600)/60);
     }
+    txt('tm-title', huso!=null ? 'Hora local del avión ('+fmtHuso(huso)+')' : 'Hora del simulador (Zulu/UTC)');
     modal.classList.remove('hidden');
   };
   document.getElementById('tm-cancel').onclick=()=>modal.classList.add('hidden');
   document.getElementById('tm-apply').onclick=()=>{
-    const h=parseInt(document.getElementById('tm-h').value,10);
-    const m=parseInt(document.getElementById('tm-m').value,10);
+    let h=parseInt(document.getElementById('tm-h').value,10);
+    let m=parseInt(document.getElementById('tm-m').value,10);
     if(isNaN(h)||isNaN(m)) return;
+    const huso=husoSimSeg();
+    if(huso!=null){                                   // local → Zulu
+      const z=(((h*3600+m*60-huso)%86400)+86400)%86400;
+      h=Math.floor(z/3600); m=Math.floor((z%3600)/60);
+    }
     fetch('/api/set_time?h='+h+'&m='+m,{method:'POST'}).then(r=>r.json()).then(d=>{
       if(!d.ok) alert('No se pudo cambiar la hora (beta). ¿MSFS está conectado?');
       modal.classList.add('hidden');
@@ -517,7 +501,6 @@ window.tpGo=function(icao,mode,ri,end){
     doTeleport(p[1],p[0],alt,hdg,140,true);
   }
 };
-document.getElementById('btn-reset').onclick=()=>{ fetch('/api/reset',{method:'POST'}).then(()=>poll()); };
 
 // ---- Sim Rate (velocidad de simulación) ----
 document.getElementById('sr-minus').onclick=(e)=>{ e.stopPropagation(); cmd('SIM_RATE_DECR'); };
@@ -542,3 +525,49 @@ document.getElementById('rad-minus').onclick=()=>changeRadius(-20);
 document.getElementById('rad-plus').onclick=()=>changeRadius(20);
 
 function txt(id,v){ const e=document.getElementById(id); if(e) e.textContent=v; }
+
+// ---- La ruta sobrevive a una recarga de la página ----
+// Safari del iPad descarta las pestañas que quedan en segundo plano y al volver recarga
+// la página: la ruta que habías armado (destino, pista, puntos) se perdía, aunque el rastro
+// volado sí volvía (ese lo guarda el backend). Ahora se guarda en el navegador cada vez que
+// cambia y se recupera al volver a tener posición del avión. Vence a las 14 h para no
+// resucitar la ruta de ayer.
+const RUTA_KEY='rutaActiva', RUTA_VIGENCIA_MS=14*3600e3;
+let rutaFirma=null;
+function guardarRuta(){
+  try{
+    if(!routeTarget){
+      if(rutaFirma!==''){ localStorage.removeItem(RUTA_KEY); rutaFirma=''; }
+      return;
+    }
+    const wps=routeWaypoints.map(w=>({lat:w.lat, lon:w.lon, name:w.name||null}));
+    const firma=JSON.stringify([routeTarget, wps, cruceroPlan, msfsPlanAuto, progressUserOn]);
+    if(firma===rutaFirma) return;
+    rutaFirma=firma;
+    localStorage.setItem(RUTA_KEY, JSON.stringify({t:Date.now(), target:routeTarget, wps:wps,
+      crucero:cruceroPlan, auto:msfsPlanAuto, planKey:msfsPlanKey, progreso2:progressUserOn}));
+  }catch(e){}
+}
+function restaurarRuta(){
+  let d=null;
+  try{ d=JSON.parse(localStorage.getItem(RUTA_KEY)||'null'); }catch(e){}
+  if(!d || !d.target) return;
+  if(routeTarget) return;                    // ya hay otra (por ejemplo, el plan de MSFS)
+  if(!(Date.now()-d.t < RUTA_VIGENCIA_MS)){ try{ localStorage.removeItem(RUTA_KEY); }catch(e){} return; }
+  routeTarget=d.target;
+  cruceroPlan=d.crucero||null; msfsPlanAuto=!!d.auto; msfsPlanKey=d.planKey||null;
+  (d.wps||[]).forEach(w=>addWaypoint(w.lon, w.lat, w.name||null, true));
+  // "progreso2": con el dock el progreso arranca visible. Lo guardado antes con la clave
+  // vieja ("progreso") casi siempre era false porque el panel arrancaba cerrado: se ignora.
+  progressUserOn = d.progreso2!==undefined ? !!d.progreso2 : true;
+  drawRoute(); updateGrids();
+  const n=(d.wps||[]).length;
+  showToast('Ruta recuperada: '+routeTarget.icao+(n?(' · '+n+' puntos'):''));
+}
+// addWaypoint necesita la posición del avión, así que se espera a tenerla.
+const esperaRutaGuardada=setInterval(()=>{
+  if(!cur) return;
+  clearInterval(esperaRutaGuardada);
+  restaurarRuta();
+  setInterval(guardarRuta, 2000);            // recién ahora: antes borraría la guardada
+}, 500);

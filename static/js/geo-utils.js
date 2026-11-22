@@ -23,18 +23,53 @@ function planeQuadJet(fill,size,stroke){ return `<svg width="${size}" height="${
 function planeTurboprop(fill,size,stroke){ return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="${fill}" ${stroke?`stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round"`:''}><path d="M24 4c-1.3 0-2.3 1.3-2.3 3.2V20L6 23.5v3l15.7-2.6V37l-4.6 3.6V44L24 42l6.9 2v-3.4L26.3 37V23.9L42 26.5v-3L26.3 20V7.2C26.3 5.3 25.3 4 24 4z"/><ellipse cx="14" cy="22" rx="1.6" ry="2.4"/><ellipse cx="34" cy="22" rx="1.6" ry="2.4"/><path d="M14 17.6v8.8M34 17.6v8.8" stroke="${fill}" stroke-width="1.3" opacity="0.75"/></svg>`; }
 // Helicóptero
 function planeHeli(fill,size,stroke){ return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="${fill}" ${stroke?`stroke="${stroke}" stroke-width="0.8"`:''}><ellipse cx="24" cy="22" rx="5" ry="9"/><rect x="22.8" y="29" width="2.4" height="13" rx="1"/><rect x="18" y="40" width="12" height="2.4" rx="1"/><path d="M8 10L40 34M40 10L8 34" stroke="${fill}" stroke-width="2" opacity="0.8"/></svg>`; }
-// Elige el ícono según el tipo de avión que reporta el simulador
+// Widebody bimotor (A330/777/787): misma silueta que el A320 pero con motores más gordos;
+// además se dibuja más grande (ver mePlaneSVG).
+function planeWide(fill,size,stroke){ return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="${fill}" ${stroke?`stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round"`:''}><path d="M24 3C22.5 3 21.4 4.5 21.4 6.8L21.4 19.5 4 30 4 33.2 21.4 27.6 21.4 37.5 16 41.4 16 44.5 24 42.6 32 44.5 32 41.4 26.6 37.5 26.6 27.6 44 33.2 44 30 26.6 19.5 26.6 6.8C26.6 4.5 25.5 3 24 3Z"/><ellipse cx="13.2" cy="25.6" rx="2.3" ry="3.7"/><ellipse cx="34.8" cy="25.6" rx="2.3" ry="3.7"/></svg>`; }
+// Jet ejecutivo / regional con motores atrás (Citation, Learjet, CRJ): alas limpias,
+// los dos motores pegados a la cola y cola en T.
+function planeRearJet(fill,size,stroke){ return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="${fill}" ${stroke?`stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round"`:''}><path d="M24 4C25.2 4 26 5.4 26 7.5L26 19 41 27 41 29.5 26 25.5 26 37 32 39.5 32 42 24 41 16 42 16 39.5 22 37 22 25.5 7 29.5 7 27 22 19 22 7.5C22 5.4 22.8 4 24 4Z"/><ellipse cx="20" cy="32.5" rx="1.8" ry="3.3"/><ellipse cx="28" cy="32.5" rx="1.8" ry="3.3"/></svg>`; }
+// Avioneta monomotor (C172, Piper): ala recta larga, hélice adelante.
+function planeGA(fill,size,stroke){ return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="${fill}" ${stroke?`stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round"`:''}><path d="M24 6C25.4 6 26.2 7.2 26.2 8.8L26.2 15 44 15 44 19.5 26.2 19.5 26 36 32.2 37.2 32.2 40.8 24 40.8 15.8 40.8 15.8 37.2 22 36 21.8 19.5 4 19.5 4 15 21.8 15 21.8 8.8C21.8 7.2 22.6 6 24 6Z"/><path d="M17.5 4.6H30.5" stroke="${fill}" stroke-width="1.8" stroke-linecap="round" opacity="0.8"/></svg>`; }
+// Bimotor de pistón (Baron, Seneca, DA62): ala recta con dos góndolas y dos hélices.
+function planeTwinProp(fill,size,stroke){ return `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="${fill}" ${stroke?`stroke="${stroke}" stroke-width="0.8" stroke-linejoin="round"`:''}><path d="M24 6C25.4 6 26.2 7.2 26.2 8.8L26.2 16 44 16.5 44 20.5 26.2 20.5 26 36 32.2 37.2 32.2 40.8 24 40.8 15.8 40.8 15.8 37.2 22 36 21.8 20.5 4 20.5 4 16.5 21.8 16 21.8 8.8C21.8 7.2 22.6 6 24 6Z"/><ellipse cx="14.5" cy="17" rx="2" ry="4.4"/><ellipse cx="33.5" cy="17" rx="2" ry="4.4"/><path d="M10 12.2H19M29 12.2H38" stroke="${fill}" stroke-width="1.6" stroke-linecap="round" opacity="0.8"/></svg>`; }
+
+// Elige el ícono del avión propio. Antes solo miraba tipo y cantidad de motores, así que
+// cualquier jet bimotor era un A320. Ahora usa el mismo perfil que la tabla de descenso
+// (código ICAO del sim, nombre, o motor + peso; o el que elijas a mano en la tabla), y el
+// tamaño también cambia: un 777 se ve más grande que un CRJ.
+function tipoIcono(){
+  const s=lastState||{}, et=s.eng_type, n=s.eng_count||0;
+  if(et===3) return 'heli';
+  let perfil=null;
+  try{ perfil=perfilElegido||perfilAuto(); }catch(e){}       // vive en flight-progress.js
+  if(perfil==='ga') return (et===0 && n>=2) ? 'twinprop' : 'ga';
+  if(perfil==='heavy') return (n && n<4) ? 'wide' : 'quad';
+  // Regionales con motores en la cola (CRJ, Fokker 70/100); los E-Jet los llevan bajo el ala
+  if(perfil==='regional' && /^(CRJ|F70|F100)/.test((s.ac_icao||'').toUpperCase())) return 'regionalcola';
+  if(perfil) return perfil;
+  if(et===1) return n>=4 ? 'quad' : 'narrow';
+  if(et===5) return 'turboprop';
+  return et===0 && n>=2 ? 'twinprop' : 'ga';
+}
 function mePlaneSVG(){
-  const s=lastState||{}, et=s.eng_type, n=s.eng_count||2;
-  const C='#fbbf24';                       // amarillo, como en Flightradar
-  if(et===1) return (n>=4) ? planeQuadJet(C,44,'#1e293b') : planeSilhouette(C,42,'#1e293b');
-  if(et===5) return planeTurboprop(C,40,'#1e293b');
-  if(et===3) return planeHeli(C,36,'#1e293b');
-  return planeSVG(C,30,'#1e293b');        // pistón / desconocido
+  const C='#fbbf24', B='#1e293b';          // amarillo, como en Flightradar
+  switch(tipoIcono()){
+    case 'quad':      return planeQuadJet(C,50,B);
+    case 'wide':      return planeWide(C,50,B);
+    case 'narrow':    return planeSilhouette(C,42,B);
+    case 'regional':  return planeSilhouette(C,37,B);
+    case 'regionalcola': return planeRearJet(C,39,B);
+    case 'bizjet':    return planeRearJet(C,34,B);
+    case 'turboprop': return planeTurboprop(C,40,B);
+    case 'twinprop':  return planeTwinProp(C,34,B);
+    case 'heli':      return planeHeli(C,36,B);
+    default:          return planeGA(C,32,B);
+  }
 }
 let acIconKey=null;
 function updatePlaneIcon(s){
-  const key=(s.eng_type==null?'x':s.eng_type)+'-'+(s.eng_count||0);
+  const key=tipoIcono();
   if(key===acIconKey) return;
   acIconKey=key;
   if(meMarker) meMarker.getElement().innerHTML=mePlaneSVG();
@@ -51,6 +86,10 @@ let aptMarkers=[], vorMarkers=[];
 const flags={apt:true,vor:true,terrain3d:false,grids:false};
 let navRef=null, navAirports=[], navVors=[];
 let aptRadius=60, lastAptCenter=null;   // radio de aeropuertos (NM)
+// Celular (vertical u horizontal): mismo corte que las @media del final de main.css.
+// Ahí los paneles se acomodan distinto (arriba/abajo o fijos a los costados).
+const MQ_CHICA=window.matchMedia('(max-width:700px), (max-height:500px)');
+function pantallaChica(){ return MQ_CHICA.matches; }
 let routeTarget=null;                    // {lat,lon,icao} destino de la ruta
 let routeWaypoints=[], wpId=0;           // puntos de ruta intermedios {id,lat,lon,marker}
 let lastGs=0;                            // última ground speed (kt), para el ETA de la ruta
@@ -72,7 +111,17 @@ map.on('load',()=>{
   // Ruta directa a un aeropuerto (plan de vuelo simple)
   map.addSource('planroute',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'planroute-line',type:'line',source:'planroute',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round'},paint:{'line-color':'#a855f7','line-width':3,'line-dasharray':[2,2]}});
-  map.addLayer({id:'planroute-pt',type:'circle',source:'planroute',filter:['all',['==',['geometry-type'],'Point'],['!',['has','ident']]],paint:{'circle-radius':6,'circle-color':'#a855f7','circle-stroke-color':'#fff','circle-stroke-width':2}});
+  map.addLayer({id:'planroute-pt',type:'circle',source:'planroute',filter:['all',['==',['geometry-type'],'Point'],['!',['has','ident']],['!',['has','vnav']]],paint:{'circle-radius':6,'circle-color':'#a855f7','circle-stroke-color':'#fff','circle-stroke-width':2}});
+  // Tope de ascenso (verde, como el ícono "en ascenso") y de descenso (celeste), calculados
+  // en flight-progress.js (featuresVnav). El texto va arriba a la derecha del punto: abajo
+  // ya están los nombres de los waypoints, y centrado encima se pisaba con la etiqueta de
+  // la propia ruta en las rutas norte-sur.
+  map.addLayer({id:'planroute-vnav-pt',type:'circle',source:'planroute',filter:['has','vnav'],paint:{'circle-radius':7,
+    'circle-color':['match',['get','vnav'],'toc','#4ade80','#38bdf8'],'circle-stroke-color':'#0f172a','circle-stroke-width':2.5}});
+  map.addLayer({id:'planroute-vnav-lbl',type:'symbol',source:'planroute',filter:['has','vnav'],layout:{'text-field':['get','label'],
+    'text-font':['Noto Sans Bold'],'text-size':12.5,'text-line-height':1.25,'text-anchor':'bottom-left','text-justify':'left','text-offset':[0.9,-0.6],
+    'text-allow-overlap':true,'text-ignore-placement':true},
+    paint:{'text-color':['match',['get','vnav'],'toc','#86efac','#7dd3fc'],'text-halo-color':'rgba(10,10,20,0.92)','text-halo-width':2.4}});
   // Nombres de los VOR de la ruta generada. Al dibujarlos como capa del mapa (y no como
   // HTML encima) se comportan bien al inclinar la vista en 3D.
   map.addLayer({id:'planroute-wp',type:'symbol',source:'planroute',filter:['all',['==',['geometry-type'],'Point'],['has','ident']],layout:{'text-field':['get','ident'],'text-font':['Noto Sans Bold'],'text-size':12.5,'text-offset':[0,1.3],'text-anchor':'top','text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#7dd3fc','text-halo-color':'rgba(10,10,20,0.92)','text-halo-width':2.4}});
@@ -102,6 +151,8 @@ map.on('load',()=>{
   // MSFS se dibuja encima y el texto queda tapado.
   map.moveLayer('planroute-label');
   map.moveLayer('planroute-wp');
+  map.moveLayer('planroute-vnav-pt');
+  map.moveLayer('planroute-vnav-lbl');
   // El plan de vuelo del propio MSFS se sigue calculando y guardando (lo usa el chip de
   // abajo), pero no lo dibujamos: poné FPLAN_LINE_VISIBLE=true para volver a verlo.
   const v = FPLAN_LINE_VISIBLE ? 'visible' : 'none';
@@ -160,9 +211,42 @@ document.getElementById('btn-center').onclick=()=>{
     if(meMarker){ const g=meMarker.getLngLat(); map.easeTo({center:centroSeguir(g.lng,g.lat)}); }
     return;
   }
-  if(followMode){ unfollow(); }
-  else { follow(); if(meMarker){ const g=meMarker.getLngLat(); map.easeTo({center:centroSeguir(g.lng,g.lat)}); } }
+  // Apagarlo con el botón es una decisión: ahí no se recentra solo (ver más abajo).
+  if(followMode){ unfollow(); autoRecentrar=false; }
+  else { autoRecentrar=true; follow(); if(meMarker){ const g=meMarker.getLngLat(); map.easeTo({center:centroSeguir(g.lng,g.lat)}); } }
 };
+
+// ---- Volver solo al avión a los 5 s ----
+// Mover el mapa con el dedo suelta el seguimiento, y después había que acordarse de
+// tocar el botón para volver. Ahora, si soltaste el seguimiento tocando o arrastrando el
+// mapa, a los 5 s sin tocar nada vuelve solo. Si lo apagaste con el BOTÓN, se respeta.
+// No vuelve mientras estés haciendo algo en el mapa: agregando puntos, con un menú,
+// popup, buscador o ventana abierta, o mirando la ficha de un avión del tráfico.
+const RECENTRAR_MS=5000;
+let autoRecentrar=true, ultimoToque=Date.now();
+// Toques y rueda siempre son tuyos. Zoom/giro/inclinación cuentan solo si traen el evento
+// original: los que dispara la propia app al seguir al avión no lo traen.
+['touchstart','touchmove','mousedown','wheel'].forEach(ev=>map.on(ev,()=>{ ultimoToque=Date.now(); }));
+['dragstart','zoomstart','rotatestart','pitchstart'].forEach(ev=>
+  map.on(ev, e=>{ if(e && e.originalEvent) ultimoToque=Date.now(); }));
+function haciendoAlgoEnElMapa(){
+  const visible=id=>{ const el=document.getElementById(id); return !!el && !el.classList.contains('hidden'); };
+  return addWpMode || (typeof lpMarker!=='undefined' && lpMarker)
+    || !!document.querySelector('.maplibregl-popup')
+    || ['search-panel','ac-card','resumen-modal','hist-modal','opts-modal','status-modal','tabla-modal','time-modal'].some(visible);
+}
+setInterval(()=>{
+  if(followMode || !autoRecentrar || towerMode2D || planeModelOn || !meMarker) return;
+  if(Date.now()-ultimoToque<RECENTRAR_MS || haciendoAlgoEnElMapa()) return;
+  // Se marca ANTES de guardar `toque` (que no se vuelva a disparar mientras dura la
+  // animación). Al revés, la comprobación de abajo nunca coincidía y no volvía a seguir.
+  ultimoToque=Date.now();
+  const g=meMarker.getLngLat(), toque=ultimoToque;
+  map.easeTo({center:centroSeguir(g.lng,g.lat), duration:900});
+  // El seguimiento se prende al terminar el viaje (si se prendiera antes, planeFrame
+  // pisaría la animación con saltos). Si en el medio tocaste el mapa, se cancela.
+  setTimeout(()=>{ if(ultimoToque===toque && !followMode) follow(); }, 950);
+}, 500);
 
 // ---- Plan de vuelo (ruta directa + teletransporte beta) ----
 function haversineNM(la1,lo1,la2,lo2){ const R=3440.065,p1=la1*Math.PI/180,p2=la2*Math.PI/180,dp=(la2-la1)*Math.PI/180,dl=(lo2-lo1)*Math.PI/180;
@@ -215,3 +299,61 @@ function drawRwyAxis(){
   src.setData({type:'FeatureCollection',features:feats});
 }
 function updateGrids(){ drawCoordGrid(); drawRwyAxis(); }
+
+// ---- Mantener pulsado (genérico) ----
+// `ms` sin moverse más de 10 px. Si arrastrás (scroll del panel, mover el mapa) se cancela.
+// Mientras se aprieta, el elemento lleva la clase "apretando" (para dar respuesta visual).
+function alMantenerPulsado(el, fn, ms){
+  if(!el) return;
+  ms=ms||450;
+  let t=null, x0=0, y0=0;
+  const arrancar=(x,y)=>{ x0=x; y0=y; clearTimeout(t); el.classList.add('apretando');
+    t=setTimeout(()=>{ t=null; el.classList.remove('apretando'); fn(); }, ms); };
+  const cancelar=()=>{ clearTimeout(t); t=null; el.classList.remove('apretando'); };
+  const moverse=(x,y)=>{ if(t && (Math.abs(x-x0)>10 || Math.abs(y-y0)>10)) cancelar(); };
+  el.addEventListener('mousedown',e=>arrancar(e.clientX,e.clientY));
+  el.addEventListener('mousemove',e=>moverse(e.clientX,e.clientY));
+  el.addEventListener('mouseup',cancelar);
+  el.addEventListener('mouseleave',cancelar);
+  el.addEventListener('touchstart',e=>{ if(e.touches[0]) arrancar(e.touches[0].clientX,e.touches[0].clientY); },{passive:true});
+  el.addEventListener('touchmove',e=>{ if(e.touches[0]) moverse(e.touches[0].clientX,e.touches[0].clientY); },{passive:true});
+  el.addEventListener('touchend',cancelar);
+  el.addEventListener('touchcancel',cancelar);
+  el.addEventListener('contextmenu',e=>e.preventDefault());   // iOS/Android: sin menú del sistema
+}
+
+// ---- Flechita de rumbo ----
+// `gradosVerdaderos`: el rumbo respecto al norte geográfico (el del mapa). Se le resta la
+// rotación del mapa para que apunte igual que la línea que ves en pantalla, aunque lo
+// hayas girado (3D en persecución). Se acumula el ángulo para que al pasar de 359° a 1° no
+// dé la vuelta entera con la animación.
+// ---- Rosa del dock: hacia dónde queda el destino ----
+// El avión va FIJO apuntando arriba (como el ND de la cabina) y la flecha ámbar marca el
+// destino respecto de la nariz: arriba = vas derecho, a la derecha = girá a la derecha.
+// Antes las dos giraban según el norte del mapa y la marca era un triángulo apuntando
+// hacia adentro: parecía una flecha al revés y no decía para dónde girar (2026-11-21).
+let rosaBrg=null;                  // rumbo verdadero al destino (lo pone updateProgress)
+function pintarRosa(){
+  const el=document.getElementById('fr-brg'); if(!el) return;
+  const h=lastState ? lastState.heading : null;
+  if(rosaBrg==null || h==null || isNaN(rosaBrg)){ el.style.visibility='hidden'; return; }
+  el.style.visibility='';
+  const giro=((rosaBrg-h)%360+540)%360-180;          // -180..180, + = a la derecha
+  let ang=giro;
+  const prev=parseFloat(el.dataset.ang);
+  if(!isNaN(prev)){ ang=prev+((((ang-prev)%360)+540)%360-180); }   // sin vueltas largas
+  el.dataset.ang=ang;
+  el.style.transform='rotate('+ang+'deg)';
+  el.classList.toggle('derecho', Math.abs(giro)<=5);
+}
+
+function girarFlecha(id, gradosVerdaderos){
+  const el=document.getElementById(id); if(!el) return;
+  if(gradosVerdaderos==null || isNaN(gradosVerdaderos)){ el.style.visibility='hidden'; return; }
+  el.style.visibility='';
+  let ang=gradosVerdaderos-(map && map.getBearing ? map.getBearing() : 0);
+  const prev=parseFloat(el.dataset.ang);
+  if(!isNaN(prev)){ ang=prev+((((ang-prev)%360)+540)%360-180); }
+  el.dataset.ang=ang;
+  el.style.transform='rotate('+ang+'deg)';
+}

@@ -8,10 +8,10 @@
 // ---- Tiempo estimado, incluso con el avión parado ----
 // Si todavía no despegaste no hay velocidad real, así que suponemos la de crucero
 // típica según el tipo de motor que reporta el simulador.
-const CRUISE_KT={1:450, 5:280, 3:110};      // 1=jet, 5=turbohélice, 3=helicóptero
-const CRUISE_KT_DEFAULT=130;                 // pistón o desconocido
+// La sale del perfil del avión (PERFILES, más abajo): antes era solo por tipo de motor y un
+// jet ejecutivo, un CRJ y un 747 suponían lo mismo.
 const CLIMB_DESC_MIN=15;                     // despegue y aterrizaje son mucho más lentos
-function assumedKt(){ const t=(lastState||{}).eng_type; return CRUISE_KT[t]||CRUISE_KT_DEFAULT; }
+function assumedKt(){ return perfilActivo().kt||130; }
 function isRealSpeed(){ return !!(lastGs && lastGs>=40); }
 function etaMinutes(nm){
   return isRealSpeed() ? (nm/lastGs*60) : (nm/assumedKt()*60 + CLIMB_DESC_MIN);
@@ -73,10 +73,10 @@ function drawRoute(){ if(!routeTarget) return;
     {type:'Feature',geometry:{type:'Point',coordinates:[routeTarget.lon,routeTarget.lat]}}];
   routeWaypoints.forEach(w=>{ if(w.name) feats.push(
     {type:'Feature',properties:{ident:w.name},geometry:{type:'Point',coordinates:[w.lon,w.lat]}}); });
+  featuresVnav(nodos, nm).forEach(f=>feats.push(f));    // T/C y T/D
   map.getSource('planroute').setData({type:'FeatureCollection',features:feats});
-  // El chip ya no repite destino/NM/rumbo: eso lo cuenta mejor el panel de progreso.
-  // Acá quedan solo las dos acciones.
-  document.getElementById('route-chip').style.display='flex';
+  // El chip de la ruta (＋ punto, ✕ cancelar) se sacó: las dos cosas están en el ícono de
+  // punto del estante del dock (1 toque / 2 toques, ver graph-panel.js).
   updateProgress(nm, brg);
 }
 // ---- Barra de progreso del vuelo (estilo Flightradar24) ----
@@ -97,8 +97,10 @@ function findOriginAirport(){
 function fmtCoord(lat,lon){
   return Math.abs(lat).toFixed(2)+'° '+(lat>=0?'N':'S')+'  '+Math.abs(lon).toFixed(2)+'° '+(lon>=0?'E':'O');
 }
-// Arranca cerrado a propósito: se abre solo si lo pedís desde la barra de herramientas
-let progressUserOn=false;
+// Con el dock (2026-11-21) el progreso ya no es un panel aparte que tapa medio mapa: es la
+// barra del perfil y unas columnas del mismo dock. Por eso arranca VISIBLE apenas hay una
+// ruta; el botón de la barra de herramientas lo sigue escondiendo si no lo querés.
+let progressUserOn=true;
 // Nombre del aeropuerto de destino, pedido por ICAO a la base completa (una sola vez)
 let destInfo=null, destInfoPending=null;
 function ensureDestInfo(icao){
@@ -110,30 +112,29 @@ function ensureDestInfo(icao){
     .then(a=>{ if(a && a.icao) destInfo=a; destInfoPending=null; })
     .catch(()=>{ destInfoPending=null; });
 }
+// La clase con-ruta en la pila del dock muestra todo lo .solo-ruta (perfil, llegada, guía,
+// marca del rumbo a seguir y próximo punto). El dock cambia de alto, y el avión se vuelve
+// a centrar solo en lo que queda de mapa (lo dispara el ResizeObserver de tools-ui.js).
 function syncProgressButton(){
-  const b=document.getElementById('btn-progress'), el=document.getElementById('progress-panel');
-  if(!b||!el) return;
+  const b=document.getElementById('btn-progress'), pila=document.getElementById('dock-pila');
+  if(!b||!pila) return;
   const avail=!!routeTarget;
   b.classList.toggle('disabled',!avail);
   b.classList.toggle('active', avail && progressUserOn);
   b.title = avail ? 'Progreso del vuelo' : 'Progreso del vuelo (necesita una ruta)';
-  const abierto = avail && progressUserOn;
-  const cambio = el.classList.contains('hidden') === abierto;   // ¿cambió la visibilidad?
-  el.classList.toggle('hidden', !abierto);
-  // Con el panel abierto los dos costados quedan ocupados, así que el avión vuelve al
-  // centro; al cerrarlo se corre otra vez a la derecha. Solo si no lo fijaste a mano.
-  if(cambio) revisarCentrado();
+  pila.classList.toggle('con-ruta', avail && progressUserOn);
 }
 function updateProgress(nmLeft, brg){
-  const el=document.getElementById('progress-panel'); if(!el) return;
   syncProgressButton();
   if(!routeTarget || !progressUserOn) return;
 
   const org=findOriginAirport();
   const r=(lastState&&lastState.route)||[];
+  // La barrita muestra la CIUDAD (OurAirports la trae como "municipality"); si no hay,
+  // el nombre del aeropuerto
   if(org){
     document.getElementById('pg-from').textContent=org.icao;
-    document.getElementById('pg-from-name').textContent=org.name||'';
+    document.getElementById('pg-from-name').textContent=org.city||org.name||org.icao;
   }else{
     // Despegaste lejos de cualquier aeropuerto: lo tratamos como punto suelto
     document.getElementById('pg-from').textContent='PUNTO';
@@ -145,57 +146,74 @@ function updateProgress(nmLeft, brg){
   let toName='';
   if(isPoint){ toName=fmtCoord(routeTarget.lat, routeTarget.lon); }
   else{
-    toName=(searchAirport&&searchAirport.icao===routeTarget.icao?searchAirport.name:(findApt(routeTarget.icao)||{}).name)||'';
+    const a=(searchAirport&&searchAirport.icao===routeTarget.icao)?searchAirport:findApt(routeTarget.icao);
+    toName=(a&&(a.city||a.name))||'';
     // Un destino lejano (ej. KBOS desde Cartagena) no está en los datos cargados alrededor
     // del avión, así que lo pedimos por ICAO a la base completa del backend.
-    if(!toName){ ensureDestInfo(routeTarget.icao); toName=(destInfo&&destInfo.icao===routeTarget.icao?destInfo.name:'')||''; }
-    // Si elegiste pista, se avisa acá: el destino no es el centro del aeropuerto sino su umbral
-    if(routeTarget.pista) toName = (toName?toName+' · ':'')+'pista '+routeTarget.pista;
+    if(!toName){ ensureDestInfo(routeTarget.icao); toName=(destInfo&&destInfo.icao===routeTarget.icao?(destInfo.city||destInfo.name):'')||''; }
   }
-  document.getElementById('pg-to-name').textContent = toName;
+  document.getElementById('pg-to-name').textContent = toName||routeTarget.icao;
 
   const done=(lastState&&lastState.distance_nm)||0;      // recorrido real, no en línea recta
   const total=done+nmLeft;
-  const pct=total>0?Math.max(0,Math.min(100,done/total*100)):0;
-  document.getElementById('pg-fill').style.width=pct+'%';
   document.getElementById('pg-done').innerHTML=fmtDistB(done);
-  document.getElementById('pg-left').innerHTML=fmtDistB(nmLeft)+' · '+routeEta(nmLeft);
+  // Sin el tiempo restante (lo dice "Llegada · en Xh") : con él no entraba en la columna
+  document.getElementById('pg-left').innerHTML=fmtDistB(nmLeft);
   document.getElementById('pg-brg').textContent=fmtBrg(brg);
+  rosaBrg=brg; pintarRosa();
 
   // Llegada estimada: con el avión quieto usa la velocidad típica del tipo de avión;
   // apenas superás los 40 nudos pasa sola al cálculo con tu velocidad real.
   const etaEl=document.getElementById('pg-eta'), min=etaMinutes(nmLeft);
   const est=!isRealSpeed();
-  const h=horaLlegada(min);
-  etaEl.textContent=(est?'~':'')+h.txt+'  ·  '+fmtHm(min);
+  // Dos lecturas, se cambia tocando la fila: la hora local del SIMULADOR a la que llegás
+  // (la que importa para saber si aterrizás de día o de noche), o la hora REAL en el iPad,
+  // que con sim rate x4 es mucho antes. Antes no decía cuál era y no se sabía.
+  const rate=Math.max(1,(lastState&&lastState.sim_rate)||1);
+  const fila=document.getElementById('pg-eta-row');
+  let h;
+  if(llegadaReal){
+    const minReal=min/rate, d=new Date(Date.now()+minReal*60000);
+    h={txt:String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'), sim:false};
+    txt('pg-eta-k','Llegada (hora real'+(rate>1?' · x'+rate:'')+')');
+    etaEl.textContent=(est?'~':'')+h.txt;
+    txt('pg-eta-en','en '+fmtHm(minReal));
+  } else {
+    h=horaLlegada(min);
+    txt('pg-eta-k', h.sim ? 'Llegada (hora sim)' : 'Llegada (hora de la PC)');
+    etaEl.textContent=(est?'~':'')+h.txt;
+    txt('pg-eta-en','en '+fmtHm(min));
+  }
+  if(fila) fila.classList.toggle('real', llegadaReal);
+  // Centro de la barrita: en cuánto aterrizás (tiempo del simulador)
+  txt('pf-aterriza', (isPoint?'Llegás en ':'Aterrizás en ')+(est?'~':'')+fmtHm(min));
   etaEl.style.color = est ? 'var(--text-dim)' : 'var(--text)';
-  etaEl.title = (est ? ('Estimado suponiendo '+assumedKt()+' kt de crucero') : 'Calculado con tu velocidad real')
-    + (h.sim ? ' · hora local del simulador' : ' · hora de tu computadora (el sim no la está dando)');
+  etaEl.title = est ? ('Estimado suponiendo '+assumedKt()+' kt de crucero') : 'Calculado con tu velocidad real';
   updateNextLeg();
   updateVnav(nmLeft);
   updateVs(nmLeft);
   updateSpd(nmLeft);
   lastNmLeft=nmLeft;
   updateTablaDescenso(nmLeft);
-  updateFaseIcono();
+  pintarPerfil(done, nmLeft);
 }
 // Última distancia al destino conocida: la tabla de descenso se puede repintar sola
 // (al cambiar de perfil) sin esperar a la próxima vuelta del panel.
 let lastNmLeft=0;
 
-// El avioncito del panel se inclina según lo que estés haciendo: subiendo, nivelado o
-// bajando. El ícono apunta al norte, así que girándolo se lee como una trayectoria.
-function updateFaseIcono(){
-  const ic=document.getElementById('pg-badge-icon'), b=document.getElementById('pg-badge');
-  if(!ic) return;
-  const vs=(lastState||{}).vs;
-  let ang=90, fase='Nivelado', col='rgba(251,191,36,0.9)', sombra='rgba(251,191,36,0.35)';  // 90° = mirando a la derecha
-  if(vs!=null && vs>300){ ang=45;  fase='En ascenso';  col='rgba(74,222,128,0.9)';  sombra='rgba(74,222,128,0.35)'; }
-  else if(vs!=null && vs<-300){ ang=135; fase='En descenso'; col='rgba(56,189,248,0.9)'; sombra='rgba(56,189,248,0.35)'; }
-  ic.style.transform='rotate('+ang+'deg)';
-  // El avioncito va oscuro sobre el círculo de color, así que lo que cambia es el fondo
-  if(b){ b.style.background=col; b.style.boxShadow='0 6px 18px '+sombra;
-    b.title=fase+(vs!=null?(' · '+(vs>=0?'+':'')+Math.round(vs)+' ft/min'):''); }
+// ---- Barrita del vuelo (arriba del dock) ----
+// Una línea del origen al destino: lo volado en celeste hasta el avión, lo que falta en
+// gris. Antes fue un perfil de altura y después una línea con T/C, T/D, puntos de ruta y la
+// fase; el 2026-11-21 se simplificó a esto (diseño "barrita"). El T/C y el T/D siguen en el
+// mapa y en la guía de abajo.
+try{ localStorage.removeItem('perfil.tc'); }catch(e){}     // lo usaba el perfil de altura
+function pintarPerfil(done, nmLeft){
+  if(!document.getElementById('pf') || !routeTarget) return;
+  const total=Math.max(1, done+nmLeft);
+  const xp=Math.max(0, Math.min(100, done/total*100));
+  document.getElementById('pf-hecho').style.width=xp+'%';
+  const avion=document.getElementById('pf-avion');
+  avion.style.left=xp+'%';
 }
 
 // ---- Guía de descenso (regla 3:1 de los pilotos) ----
@@ -225,6 +243,16 @@ const PG_GRIS='var(--text-dim)';
 // la está dando, se cae a la hora de la PC y se avisa en el tooltip.
 // El sim rate NO se toma en cuenta a propósito: las horas del simulador ya corren
 // aceleradas junto con el vuelo, así que la cuenta cierra sola.
+let llegadaReal=false;
+try{ llegadaReal=localStorage.getItem('llegada.real')==='1'; }catch(e){}
+(function(){
+  const fila=document.getElementById('pg-eta-row'); if(!fila) return;
+  fila.addEventListener('click',()=>{
+    llegadaReal=!llegadaReal;
+    try{ localStorage.setItem('llegada.real',llegadaReal?'1':'0'); }catch(e){}
+    if(routeTarget) drawRoute();
+  });
+})();
 function horaLlegada(min){
   const s=lastState||{};
   if(s.local_time!=null){
@@ -259,42 +287,57 @@ function updateVnav(nmLeft){
   const row=document.getElementById('pg-vnav-row'), el=document.getElementById('pg-vnav');
   const s=lastState||{};
   if(!routeTarget || routeTarget.icao==='PUNTO'){
-    pgFila('pg-vnav-row','pg-vnav','Altura recomendada','poné un aeropuerto de destino',PG_GRIS); return; }
+    pgFila('pg-vnav-row','pg-vnav','Altura','poné un aeropuerto de destino',PG_GRIS); return; }
   if(s.alt==null){
-    pgFila('pg-vnav-row','pg-vnav','Altura recomendada','—',PG_GRIS); return; }
+    pgFila('pg-vnav-row','pg-vnav','Altura','—',PG_GRIS); return; }
   if(s.on_ground){
-    pgFila('pg-vnav-row','pg-vnav','Altura recomendada','se calcula al despegar',PG_GRIS); return; }
+    pgFila('pg-vnav-row','pg-vnav','Altura','se calcula al despegar',PG_GRIS); return; }
   if(!nmLeft){
-    pgFila('pg-vnav-row','pg-vnav','Altura recomendada','—',PG_GRIS); return; }
+    pgFila('pg-vnav-row','pg-vnav','Altura','—',PG_GRIS); return; }
   row.style.display='';
-  row.querySelector('.pg-k').textContent='Altura recomendada';
+  row.querySelector('.pg-k').textContent='Altura';
+
+  // Va antes del chequeo de "ya venís a la altura de llegada": en un destino alto (Bogotá,
+  // 8.360 ft) ese chequeo saltaba en pleno ascenso.
+  // Antes del T/D la fila es la del CRUCERO: a qué altura vas y en cuánto llegás. La
+  // etiqueta dice de dónde sale esa altura (tu AP, el plan, o una estimación). Sin este
+  // tope, lejos del destino la regla 3:1 pedía cosas como "77,000 ft · vas 64,900 bajo"
+  // (257 NM × 300 ft).
+  const vn=calcVnav(nmLeft);
+  if(vn && vn.tod!=null){
+    const de={ap:'Crucero (tu AP)', plan:'Crucero (plan)', nivelado:'Crucero', estimado:'Crucero estimado'}[vn.fuente]||'Crucero';
+    if(vn.toc!=null){
+      pgFila('pg-vnav-row','pg-vnav', de+(vn.recortado?' · ruta corta':''),
+        // Sin el "a 2.100 ft/min": ya está en el panel de datos y en el iPad partía la fila en dos
+        fmtFL(vn.techo)+' en '+fmtMin(vn.tocMin));
+    } else {
+      pgFila('pg-vnav-row','pg-vnav', de, fmtFL(vn.techo)+' · nivelado', '#4ade80');
+    }
+    return; }
 
   const elev=destElevFt();
   const floor=elev+1500;                       // apuntamos a 1500 ft sobre el aeropuerto
   if(s.alt-floor<300){
-    pgFila('pg-vnav-row','pg-vnav','Altura recomendada','ya venís a la altura de llegada',PG_GRIS); return; }
+    pgFila('pg-vnav-row','pg-vnav','Altura','ya venís a la altura de llegada',PG_GRIS); return; }
 
   // Misma cuenta que la tabla de descenso (300 ft por milla + elevación del aeropuerto),
   // así que la fila y la tabla nunca se contradicen. Redondeada de a 500 ft (no de a 100)
   // para que no esté bailando todo el tiempo con cada actualización de posición.
-  const t=Math.round(altEnNm(nmLeft)/500)*500;
+  // CON TOPE en la altura más alta del vuelo: la 3:1 no sabe a qué altura volaste, y en un
+  // salto a 9.000 ft pedía "14.000 ft · vas 5.000 bajo" — subir para después bajar, nada
+  // que ver. Nunca pide más de lo que volaste.
+  const techo=Math.max(s.alt, s.max_alt||0);
+  const t=Math.min(Math.round(altEnNm(nmLeft)/500)*500, Math.round(techo/500)*500);
   const diff=s.alt-t;
-  // Ir por encima del perfil sí importa (no llegás a bajar a tiempo). Ir por debajo no
-  // es un problema, así que solo lo informamos cuando la diferencia es grande.
-  if(diff>300){
-    // Cuánto tenés que bajar para emparejarte con el perfil, repartido en lo que queda
-    // de vuelo — la misma cuenta que la fila "Bajar a", puesta acá al lado para no
-    // tener que mirar dos filas separadas y sacar la cuenta mental vos mismo.
-    let extra='';
-    if(lastGs && lastGs>=40){
-      const min=nmLeft/lastGs*60;
-      const fpm=Math.round((s.alt-floor)/Math.max(1,min)/50)*50;
-      if(fpm>0) extra=' (−'+nf(fpm)+')';
-    }
-    el.textContent=nf(t)+' ft'+extra; el.style.color='#fb923c';
+  // Solo importa ir ALTO (no llegás a bajar a tiempo): ahí sí se dice cuánto y a qué
+  // régimen bajar. Ir un poco bajo no es problema (se nivela y listo), así que no se le
+  // ponen números: "bien" o "algo bajo".
+  // El régimen para corregir ya lo da la fila de abajo ("Bajar a"): acá solo cuánto.
+  if(diff>1000){
+    pgFila('pg-vnav-row','pg-vnav','Vas alto', nf(Math.round(diff/500)*500)+' ft de más · senda '+nf(t)+' ft','#fb923c');
   }
-  else if(diff<-1500){ el.textContent=nf(t)+' ft · vas '+nf(Math.round(-diff/100)*100)+' bajo'; el.style.color='var(--text-dim)'; }
-  else { el.textContent=nf(t)+' ft · en la senda'; el.style.color='#4ade80'; }
+  else if(diff<-3000){ pgFila('pg-vnav-row','pg-vnav','Altura', 'algo bajo · mantené '+nf(Math.round(s.alt/500)*500)+' ft',PG_GRIS); }
+  else { pgFila('pg-vnav-row','pg-vnav','Altura', 'bien · senda '+nf(t)+' ft','#4ade80'); }
 }
 
 // Régimen de descenso necesario: cuántos pies por minuto hacen falta para llegar a la
@@ -305,6 +348,13 @@ function updateVs(nmLeft){
     pgFila('pg-vs-row','pg-vs','Bajar a','—',PG_GRIS); return; }
   if(s.on_ground){ pgFila('pg-vs-row','pg-vs','Bajar a','se calcula al despegar',PG_GRIS); return; }
   if(!lastGs || lastGs<40){ pgFila('pg-vs-row','pg-vs','Bajar a','necesito velocidad real',PG_GRIS); return; }
+  // Antes del T/D no hay que bajar todavía: repartir la bajada en todo lo que falta daba
+  // un "−100 ft/min" en verde en pleno ascenso. Va antes del "no hace falta bajar" por lo
+  // mismo que en updateVnav (destinos altos).
+  const vn=calcVnav(nmLeft);
+  if(vn && vn.tod!=null){
+    pgFila('pg-vs-row','pg-vs','Bajar en', vn.todMin<1?'ahora':'en '+fmtMin(vn.todMin)+' · '+nf(km(vn.tod))+' km',
+      vn.todMin<=3?'#fbbf24':PG_GRIS); return; }
   const perder=s.alt-(destElevFt()+1500);
   if(perder<300){ pgFila('pg-vs-row','pg-vs','Bajar a','no hace falta bajar',PG_GRIS); return; }
   const min=nmLeft/lastGs*60;                    // minutos que faltan al destino
@@ -314,18 +364,22 @@ function updateVs(nmLeft){
          '−'+nf(fpm)+' ft/min', fpm>2000?'#fb923c':(fpm>0?'#4ade80':PG_GRIS));
 }
 
-// Velocidad recomendada. En descenso manda el perfil del avión (la misma tabla que se
-// abre manteniendo pulsada la fila); lejos del destino, la regla general de 250 kt bajo
-// 10.000 pies, que es la que aplica siempre.
+// Velocidad recomendada, según la fase del vuelo:
+//  - debajo de 10.000 ft: la regla de 250 kt (solo jets: un ATR o una avioneta ni llegan);
+//  - subiendo: la velocidad de ascenso del avión (IAS, y arriba del cruce el Mach);
+//  - en crucero: el Mach de crucero del avión, comparado con el que llevás;
+//  - bajando: el perfil del avión (la misma tabla que se abre manteniendo la fila), con
+//    flaps y VAPP al final.
+// Antes, fuera del descenso solo decía "libre sobre 10.000 ft", que no ayudaba en nada.
+function fmtMach(m){ return 'M'+m.toFixed(2).replace(/^0/,''); }
 function updateSpd(nmLeft){
   const s=lastState||{};
   if(s.alt==null || s.ias==null){ pgFila('pg-spd-row','pg-spd','Velocidad','—',PG_GRIS); return; }
   if(s.on_ground){ pgFila('pg-spd-row','pg-spd','Velocidad','en tierra',PG_GRIS); return; }
 
-  const nm=Math.round(nmLeft||0);
+  const nm=Math.round(nmLeft||0), p=perfilActivo();
   if(enDescenso(nm)){
-    const p=perfilActivo();
-    if(nm<4){ pgFila('pg-spd-row','pg-spd','Velocidad en final','VAPP '+p.vapp+' kt','#7dd3fc'); return; }
+    if(nm<4){ pgFila('pg-spd-row','pg-spd','Vel. final','VAPP '+p.vapp+' kt','#7dd3fc'); return; }
     const flap=flapsEnNm(nm,p);
     if(flap){ pgFila('pg-spd-row','pg-spd','Configuración', flap+' · a '+nm+' NM','#fbbf24'); return; }
     // La velocidad es la de ESTA milla, la misma que muestra la fila de la tabla donde
@@ -341,16 +395,43 @@ function updateSpd(nmLeft){
     }
     const sig=proximoCambio(p,nm);
     if(sig && !extra) extra=' · '+sig.texto+' en '+sig.nm+' NM';
-    pgFila('pg-spd-row','pg-spd','Velocidad objetivo', objetivo+extra, color);
+    pgFila('pg-spd-row','pg-spd','Vel. bajando', objetivo+extra, color);
     return;
   }
 
-  if(s.alt<10000){
-    const exceso=s.ias-250;
-    if(exceso>10) pgFila('pg-spd-row','pg-spd','Velocidad','máx 250 kt · '+Math.round(exceso)+' de más','#fb923c');
-    else          pgFila('pg-spd-row','pg-spd','Velocidad','máx 250 kt bajo 10.000','#4ade80');
+  const vn=(routeTarget && routeTarget.icao!=='PUNTO') ? calcVnav(nmLeft) : null;
+  const subiendo = vn ? vn.toc!=null : (s.vs!=null && s.vs>300);
+  const [ktSube, machSube]=p.velSube||[250,null];
+  const jet=ktSube>=250;
+  const verde='#4ade80', naranja='#fb923c';
+
+  // Regla de 250 kt debajo de 10.000 ft (para cualquiera que vaya más rápido)
+  if(s.alt<10000 && s.ias>260){
+    pgFila('pg-spd-row','pg-spd','Velocidad','máx 250 kt bajo 10.000 · '+Math.round(s.ias-250)+' de más',naranja); return; }
+  if(s.alt<10000 && jet){
+    pgFila('pg-spd-row','pg-spd', subiendo?'Vel. subiendo':'Velocidad','250 kt hasta 10.000 ft',verde); return; }
+
+  if(subiendo){
+    // Arriba de ~FL280 el avión pasa a mantener Mach (la IAS va bajando sola)
+    if(machSube && s.alt>=28000){
+      const ok=s.mach==null || Math.abs(s.mach-machSube)<=0.02;
+      pgFila('pg-spd-row','pg-spd','Vel. subiendo', fmtMach(machSube)+(s.mach!=null&&!ok?' · vas '+fmtMach(s.mach):''), ok?verde:'#fbbf24');
+    } else {
+      const ok=Math.abs(s.ias-ktSube)<=15;
+      pgFila('pg-spd-row','pg-spd','Vel. subiendo', ktSube+' kt'+(machSube?' → '+fmtMach(machSube):'')+(ok?'':' · vas '+Math.round(s.ias)),
+        ok?verde:'#fbbf24');
+    }
+    return;
+  }
+
+  // Crucero
+  if(p.mach && s.alt>=25000){
+    const ok=s.mach==null || Math.abs(s.mach-p.mach)<=0.02;
+    pgFila('pg-spd-row','pg-spd','Velocidad', fmtMach(p.mach)+(s.mach!=null?(ok?' · bien':' · vas '+fmtMach(s.mach)):''), ok?verde:'#fbbf24');
   } else {
-    pgFila('pg-spd-row','pg-spd','Velocidad','libre sobre 10.000 ft',PG_GRIS);
+    const ias=p.iasCrucero||ktSube;
+    const ok=Math.abs(s.ias-ias)<=20;
+    pgFila('pg-spd-row','pg-spd','Velocidad', '~'+ias+' kt'+(ok?' · bien':' · vas '+Math.round(s.ias)), ok?verde:PG_GRIS);
   }
 }
 
@@ -359,15 +440,43 @@ function updateSpd(nmLeft){
 // que las altitudes se calculan, no se copian. Lo que sí cambia según el avión es la
 // VELOCIDAD, y eso es lo que guardan estos perfiles: pares [desde cuántas NM, qué IAS].
 // Se lee de arriba hacia abajo y vale el primero cuyo tramo ya empezaste.
+// Además de la velocidad, cada perfil trae cómo sube y a qué altura suele ir, para ubicar
+// en la ruta el tope de ascenso (T/C) y el de descenso (T/D):
+//   sube      = [régimen medio de ascenso en ft/min, velocidad sobre el suelo media en kt].
+//               Es el PROMEDIO hasta crucero: un A320 sale a 2500 ft/min pero arriba de
+//               FL300 sube a 1000, y en total tarda ~20-22 min hasta FL350.
+//   crucero   = altitud típica (ft) si no hay plan de MSFS que la diga.
+//   kt        = velocidad de crucero típica, para la ETA con el avión parado.
+//   margenTod = millas extra antes del 3:1 para frenar: cuanto más pesado, más le cuesta
+//               bajar y frenar a la vez, así que empieza antes.
+//   velSube   = [IAS de ascenso sobre 10.000 ft, Mach al que pasa arriba] (fila Velocidad).
+//   mach      = Mach de crucero; iasCrucero = IAS de crucero para los que no van por Mach.
 const PERFILES={
   narrow:{ nombre:'A320 / narrowbody', vapp:'135-145',
+    sube:[1700,330], crucero:35000, kt:450, margenTod:5, velSube:[290,0.78], mach:0.78,
     vel:[[100,'280 kt'],[40,'250 kt'],[20,'210 kt'],[15,'180-190 kt'],[10,'170 kt']] },
   wide:{ nombre:'A330 / widebody', vapp:'140-155',
+    sube:[1400,340], crucero:37000, kt:470, margenTod:8, velSube:[300,0.82], mach:0.82,
     vel:[[100,'280 kt'],[35,'250 kt'],[25,'220 kt'],[20,'210 kt'],[15,'190-200 kt'],[10,'180 kt']] },
   heavy:{ nombre:'747 / heavy', vapp:'145-150',
+    sube:[1200,340], crucero:36000, kt:480, margenTod:12, velSube:[320,0.85], mach:0.85,
     vel:[[90,'300 kt'],[80,'290 kt'],[60,'280 kt'],[40,'250 kt'],[30,'240 kt'],
          [25,'220 kt'],[20,'210 kt'],[15,'190 kt'],[12,'180 kt'],[10,'170 kt']],
     flaps:[[8,'Flaps iniciales'],[6,'Config. intermedia'],[4,'Config. final']] },
+  regional:{ nombre:'E-Jet / CRJ / regional', vapp:'130-140',
+    sube:[1800,310], crucero:33000, kt:430, margenTod:4, velSube:[290,0.76], mach:0.77,
+    vel:[[100,'280 kt'],[40,'250 kt'],[20,'210 kt'],[12,'180 kt'],[9,'160 kt']] },
+  turboprop:{ nombre:'ATR / Dash 8 / turbohélice', vapp:'110-120',
+    sube:[1300,200], crucero:22000, kt:270, margenTod:0, velSube:[180,null], iasCrucero:200,
+    vel:[[100,'240 kt'],[30,'210 kt'],[15,'180 kt'],[10,'160 kt']],
+    flaps:[[8,'Flaps 15'],[4,'Flaps 30 / final']] },
+  bizjet:{ nombre:'Jet ejecutivo', vapp:'115-130',
+    sube:[2500,300], crucero:41000, kt:440, margenTod:3, velSube:[270,0.75], mach:0.80,
+    vel:[[100,'280 kt'],[40,'250 kt'],[15,'200 kt'],[10,'170 kt']] },
+  ga:{ nombre:'Avioneta / pistón', vapp:'65-75',
+    sube:[600,90], crucero:7500, kt:120, margenTod:0, velSube:[75,null], iasCrucero:110,
+    vel:[[100,'crucero'],[10,'100 kt']],
+    flaps:[[4,'Flaps 10°'],[2,'Flaps full']] },
 };
 // La tabla se genera milla por milla, de 120 NM hasta 1: así, sea cual sea la distancia
 // que falta, hay una fila exacta para leer en vez de tener que interpolar entre dos.
@@ -387,16 +496,243 @@ function flapsEnNm(nm,p){
 
 let perfilElegido=null;      // null = lo deduce del avión cargado en el sim
 
-// Adivina el perfil por el nombre del avión que reporta el simulador: primero busca el
-// 747 específicamente (tiene su propia tabla), después si es ancho o angosto en general.
-function perfilAuto(){
-  const t=((lastState&&lastState.aircraft)||'').toLowerCase();
-  if(!t) return 'narrow';
-  if(/747|748/.test(t)) return 'heavy';
-  const ancho=/a3[35]0|a340|a380|b?7[456]7|777|787|767|md-?11|dc-?10|widebody/.test(t);
-  return ancho?'wide':'narrow';
+// Adivina el perfil del avión cargado en el sim, de lo más confiable a lo menos:
+//  1. el código ICAO de ATC MODEL (A20N, B738, E175...), que no depende de la librea;
+//  2. el nombre (TITLE), que a veces es solo el de la librea ("Avianca HK-5555");
+//  3. tipo de motor + peso máximo de despegue, que siempre está y da el tamaño.
+// Antes solo existía el paso 2, y todo lo que no decía 747/A330/777... caía en "narrow":
+// un ATR o una avioneta se trataban como un A320.
+const ICAO_PERFIL=[
+  [/^(B74|B748|A38|A124|AN22|AN25)/,'heavy'],
+  [/^(A30|A310|A33|A34|A35|B76|B77|B78|MD11|DC10|IL96|L101)/,'wide'],
+  [/^(CRJ|E1[0-9]{2}|E29|E75|E2[0-9]{2}|E35L|RJ[0-9]|B46|F70|F100|SU95|AJ27)/,'regional'],
+  [/^(AT4|AT7|ATP|DH8|DHC[6-8]|SF34|JS[0-9]|B190|D328|SW4|C208|PC12|TBM|BE20|B350|BE9L|KODI|L410|Y12|C27J|C130|C30J|AN2[46])/,'turboprop'],
+  [/^(C25|C5[0-9]{2}|C55|C56|C68|C700|C750|CL30|CL35|CL60|GL[0-9A-Z]|GLF|GLEX|FA[0-9]|F2TH|F900|LJ|E50P|E55P|E545|E550|HDJT|SF50|EA50|PRM1|H25)/,'bizjet'],
+  [/^(A3[12][0-9]|A19N|A20N|A21N|BCS|A22|B73|B3[789]M|B3XM|B75|MD8|MD9|B712|C919|DC9)/,'narrow'],
+  [/^(C1[0-9]{2}|C2[0-9]{2}|PA|P28|DA[0-9]|SR2|BE3[3-6]|BE5|BE76|M20|CUB|J3|DR40|TB[0-9]|AA5|C42|DV20|VL3|SAVG)/,'ga'],
+];
+function perfilPorIcao(icao){
+  if(!icao) return null;
+  for(const [re,p] of ICAO_PERFIL){ if(re.test(icao)) return p; }
+  return null;
 }
+function perfilPorTitulo(t){
+  if(!t) return null;
+  if(/747|748|a380|an-?124/.test(t)) return 'heavy';
+  if(/a3[035]0|a340|a350|b?7[678]7|777|787|767|md-?11|dc-?10|widebody/.test(t)) return 'wide';
+  if(/crj|e-?jet|e1[79]\d|erj|e175|e190|e195|embraer 1[79]|bae ?146|avro ?rj|fokker/.test(t)) return 'regional';
+  if(/atr|dash ?8|q400|dhc-?[678]|king ?air|caravan|kodiak|pc-?12|tbm|saab ?340|twin otter|beech(craft)? ?1900/.test(t)) return 'turboprop';
+  if(/citation|cj[1-4]|longitude|latitude|learjet|lear |gulfstream|challenger|global|falcon|phenom|praetor|hondajet|vision jet|sf50|eclipse/.test(t)) return 'bizjet';
+  if(/a3[12]\d|a2[0-1]n|a220|737|757|md-?8\d|a32nx|fenix|neo\b/.test(t)) return 'narrow';
+  if(/cessna 1[5-8]\d|c1[5-8]\d|skyhawk|skylane|piper|cub|cherokee|archer|warrior|seminole|diamond|da ?40|da ?42|da ?62|cirrus|sr2\d|bonanza|baron|mooney|robin|extra 3\d0|icon a5|savage|zlin|aviat|pitts|carbon ?cub|glider|planeador/.test(t)) return 'ga';
+  return null;
+}
+// Sin código ni nombre conocido: el motor y el peso (lb) dicen el tamaño.
+// 0=pistón 1=jet 3=helicóptero 5=turbohélice (ENGINE TYPE de SimConnect).
+function perfilPorPeso(engType, mtow){
+  if(engType===0 || engType===3) return 'ga';
+  if(engType===5) return (mtow && mtow<20000) ? 'ga' : 'turboprop';
+  if(engType===1 && mtow){
+    if(mtow>700000) return 'heavy';
+    if(mtow>300000) return 'wide';
+    if(mtow>130000) return 'narrow';
+    if(mtow>45000)  return 'regional';
+    return 'bizjet';
+  }
+  return null;
+}
+// Devuelve también DE DÓNDE salió, para mostrarlo en la tabla ("por código", "por peso")
+// y que se note si la app adivinó o lo sabía.
+function deteccionAvion(){
+  const s=lastState||{};
+  const icao=(s.ac_icao||'').toUpperCase();
+  let p=perfilPorIcao(icao);
+  if(p) return {perfil:p, fuente:icao};
+  p=perfilPorTitulo((s.aircraft||'').toLowerCase());
+  if(p) return {perfil:p, fuente:'por nombre'};
+  p=perfilPorPeso(s.eng_type, s.ac_mtow_lb);
+  if(p) return {perfil:p, fuente:'por motor y peso'};
+  return {perfil:'narrow', fuente:'sin datos'};
+}
+function perfilAuto(){ return deteccionAvion().perfil; }
 function perfilActivo(){ return PERFILES[perfilElegido||perfilAuto()]||PERFILES.narrow; }
+
+// ---- Tope de ascenso (T/C) y de descenso (T/D) sobre la ruta ----
+// MSFS mete sus propios TIMECRUIS/TIMEDSCNT en el plan, en lugares que no servían (se
+// filtran en server/msfs_plan.py). Estos se calculan con el perfil del avión:
+//  - Crucero: el del plan de MSFS si la ruta vino de ahí; si no, el típico del perfil,
+//    recortado en vuelos cortos (nadie sube un A320 a FL350 para 80 NM). Si ya volaste
+//    más alto, manda la altura real; y si vas nivelado cerca del crucero, esa es la tuya.
+//  - T/C: lo que falta subir ÷ régimen medio × velocidad media de ascenso. Se mide desde
+//    donde estás, así que se va acercando solo y desaparece al llegar arriba.
+//  - T/D: la regla 3:1 de la tabla de descenso (así nunca se contradicen) + el margen del
+//    perfil para frenar. Un jet a FL350 da ~115-125 NM antes del destino.
+// Si la ruta es tan corta que no alcanza para subir al crucero y bajar, el techo se baja
+// hasta donde se crucen la subida y la bajada.
+let cruceroPlan=null;   // ft: CruisingAlt del plan de MSFS (lo pone checkMsfsPlan en flightplan.js)
+const NM_POR_FT_BAJANDO=1/300;   // 3:1, igual que altEnNm()
+
+// Duración legible: "12 min", "1h 05m"
+function fmtMin(m){ return m>=60 ? fmtHm(m) : Math.max(1,Math.round(m))+' min'; }
+
+// Régimen vertical suavizado (~6 s): el VS del sim salta de una lectura a otra y el "llegás
+// en X min" bailaba. Se actualiza por tiempo, no por llamada (calcVnav se llama varias
+// veces por segundo desde lugares distintos).
+let vsSuave=null, vsSuaveT=0;
+function vsSuavizado(){
+  const s=lastState||{}, ahora=Date.now();
+  if(s.vs==null){ vsSuave=null; return null; }
+  const dt=Math.min(10,(ahora-vsSuaveT)/1000); vsSuaveT=ahora;
+  vsSuave = vsSuave==null ? s.vs : vsSuave+(s.vs-vsSuave)*Math.min(1,dt/6);
+  return vsSuave;
+}
+// Altura del piloto automático como objetivo: tiene que estar a tu altura o arriba (si
+// está abajo es que ya estás bajando) y ser una altura de verdad (≥ 5.000 ft).
+// OJO: algunos aviones de terceros (Fenix, por ejemplo) no la publican en la SimVar
+// estándar; entonces no aparece y se usa el plan o la estimación.
+function altAP(){
+  const s=lastState||{}, ap=s.ap;
+  if(!ap || ap.alt==null || s.alt==null) return null;
+  if(ap.alt<5000 || ap.alt<s.alt-300) return null;
+  return Math.round(ap.alt/100)*100;
+}
+// Cuánto llevás nivelado a la misma altura (para tomarla como tu crucero)
+let nivelDesde=null, nivelAlt=null;
+function segundosNivelado(){
+  const s=lastState||{};
+  if(s.on_ground!==false || s.alt==null || s.vs==null || Math.abs(s.vs)>=300){ nivelDesde=null; return 0; }
+  if(nivelDesde==null || Math.abs(s.alt-nivelAlt)>200){ nivelDesde=Date.now(); nivelAlt=s.alt; }
+  return (Date.now()-nivelDesde)/1000;
+}
+
+// La altura de crucero es la que VOS vas a volar, no un número fijo. En orden:
+//   1. la del piloto automático (lo que pusiste en el FCU/MCP);
+//   2. la del plan de MSFS, si el AP está más abajo mientras subís (una restricción
+//      intermedia, tipo FL100) — una vez que llegaste al plan, vuelve a mandar el AP;
+//   3. si no hay ninguna, una estimación por el largo del vuelo y el tipo de avión
+//      (un jet en un vuelo largo: FL330-FL410; en un salto corto, menos), y si ya llevás
+//      un minuto nivelado arriba, tu altura.
+// El T/C usa tu régimen real de subida (si estás subiendo) y tu velocidad: "si seguís así,
+// llegás a FL350 en 12 min".
+function calcVnav(nmLeft){
+  const s=lastState||{}, p=perfilActivo();
+  if(!routeTarget || routeTarget.icao==='PUNTO' || !(nmLeft>0)) return null;
+  const elevDest=destElevFt();
+  const alt=(s.alt!=null)?s.alt:0;
+  const enAire=s.on_ground===false;
+  const [fpm,ktSube]=p.sube;
+  const nmPorFtSubiendo=ktSube/60/fpm;
+  const margen=p.margenTod||0;
+  const vs=vsSuavizado();
+
+  const apAlt=altAP();
+  let crucero=null, fuente='';
+  if(cruceroPlan){ crucero=cruceroPlan; fuente='plan'; }
+  if(apAlt && (!crucero || apAlt>=crucero || (s.max_alt||0)>=crucero-500)){ crucero=apAlt; fuente='ap'; }
+  if(!crucero){
+    const viaje=(s.distance_nm||0)+nmLeft;          // largo total del vuelo, no lo que falta
+    crucero=Math.min(p.crucero, Math.max(elevDest+3000, 10000+viaje*100));
+    crucero=Math.round(crucero/1000)*1000;           // niveles redondos: FL230, no FL234
+    fuente='estimado';
+    if(s.max_alt && s.max_alt>crucero) crucero=s.max_alt;
+    if(segundosNivelado()>=60 && alt>=Math.min(15000, crucero*0.75)){ crucero=Math.round(alt/100)*100; fuente='nivelado'; }
+  }
+
+  // ¿Alcanza la ruta para subir hasta ahí y bajar? Si no, techo donde se cruzan.
+  let techo=crucero;
+  const subir=Math.max(0,techo-alt);
+  if(subir*nmPorFtSubiendo + (techo-elevDest)*NM_POR_FT_BAJANDO + margen > nmLeft){
+    techo=(nmLeft-margen + alt*nmPorFtSubiendo + elevDest*NM_POR_FT_BAJANDO)
+          /(nmPorFtSubiendo+NM_POR_FT_BAJANDO);
+    techo=Math.floor(techo/1000)*1000;
+  }
+  const bajando = enAire && s.vs!=null && s.vs<-500;
+  const out={techo:Math.max(techo,alt), recortado:techo<crucero-400, fuente:fuente};
+
+  // T/C: solo mientras falte subir (y no estés ya bajando). Subiendo de verdad, con tu
+  // régimen y tu velocidad; si no, con los del perfil del avión.
+  const falta=techo-alt;
+  if(falta>500 && !bajando){
+    if(enAire && vs!=null && vs>300 && lastGs>=40){
+      out.tocMin=falta/vs;
+      out.toc=out.tocMin*lastGs/60;
+      out.vsReal=vs;
+    } else {
+      out.toc=falta*nmPorFtSubiendo;                 // NM desde donde estás
+      out.tocMin=falta/fpm;
+    }
+  }
+  // T/D: desde la altura más alta entre el techo y la que llevás
+  const desdeDestino=(Math.max(techo,alt)-elevDest)*NM_POR_FT_BAJANDO + margen;
+  const adelante=nmLeft-desdeDestino;
+  // Si ya venís bajando, el T/D quedó atrás (empezaste antes, o ATC te bajó): manda la
+  // senda de descenso. Antes seguía diciendo "Crucero · nivelado / bajar en 1 min".
+  // Pero solo cerca del T/D: bajando a 1000 NM del destino (un escalón de ATC, o la demo
+  // que sube y baja en círculos) marcaba el T/D justo donde estabas (2026-11-21).
+  const yaEnDescenso = bajando && adelante < Math.max(40, desdeDestino*0.5);
+  if(adelante>1 && !yaEnDescenso){
+    out.tod=adelante;                                // NM desde donde estás
+    out.todDest=desdeDestino;                        // NM antes del destino
+    const kt=(enAire && lastGs>=40)?lastGs:p.kt;
+    out.todMin=adelante/kt*60 + (out.tocMin? out.tocMin*0.3 : 0);  // el ascenso es más lento
+  }
+  return out;
+}
+function fmtFL(ft){
+  ft=Math.round(ft/100)*100;
+  return ft>=18000 ? 'FL'+String(Math.round(ft/100)).padStart(3,'0') : nf(ft)+' ft';
+}
+// Punto a `dist` NM desde el inicio de la ruta, siguiendo sus tramos ([lng,lat]).
+function puntoEnRuta(nodos, dist){
+  for(let i=0;i<nodos.length-1;i++){
+    const a=nodos[i], b=nodos[i+1];
+    const tramo=haversineNM(a[1],a[0],b[1],b[0]);
+    if(dist<=tramo){ const t=tramo>0?dist/tramo:0;
+      return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]; }
+    dist-=tramo;
+  }
+  return nodos[nodos.length-1];
+}
+// Features para la fuente 'planroute' (capas planroute-vnav-* en geo-utils.js)
+// Aviso unos minutos antes del T/D y otro al llegar, una sola vez por ruta. No avisa si
+// ya venís bajando (empezaste antes) ni en tierra.
+let todAviso={clave:null, previo:false, ahora:false};
+function avisoTod(v){
+  const s=lastState||{};
+  const clave=routeTarget ? routeTarget.icao+'@'+routeTarget.lat.toFixed(3)+','+routeTarget.lon.toFixed(3) : null;
+  if(todAviso.clave!==clave) todAviso={clave:clave, previo:false, ahora:false};
+  if(!v || v.tod==null || s.on_ground!==false) return;
+  if(s.vs!=null && s.vs<-500) return;
+  if(!todAviso.ahora && v.tod<=3){
+    todAviso.ahora=todAviso.previo=true;
+    showToast('Empezá a bajar ahora · desde '+fmtFL(Math.max(v.techo, s.alt||0)));
+  } else if(!todAviso.previo && v.todMin<=3){
+    todAviso.previo=true;
+    showToast('En ~'+Math.max(1,Math.round(v.todMin))+' min empezás a bajar · preparate');
+  }
+}
+function featuresVnav(nodos, nmLeft){
+  const v=calcVnav(nmLeft);
+  avisoTod(v);
+  if(!v) return [];
+  // Antes decían "T/C · FL130 (ruta corta) / en 2 min · 17 km" y "T/D · 46 NM antes / en
+  // 2 min · 22 km": mezclaban distancias desde vos y desde el destino y no se entendían.
+  // Ahora dicen qué pasa ahí y en cuánto tiempo; el lugar ya lo marca el punto en la línea.
+  const f=[];
+  if(v.toc!=null && v.toc<nmLeft){
+    const s=lastState||{};
+    const cuando = s.on_ground===false ? 'en '+fmtMin(v.tocMin) : fmtMin(v.tocMin)+' tras despegar';
+    f.push({type:'Feature',properties:{vnav:'toc',
+      label:'Llegás a '+fmtFL(v.techo)+'\n'+cuando+(v.recortado?' · máx. por ruta corta':'')},
+      geometry:{type:'Point',coordinates:puntoEnRuta(nodos,v.toc)}});
+  }
+  if(v.tod!=null){
+    f.push({type:'Feature',properties:{vnav:'tod',
+      label:'Empezá a bajar\n'+(v.todMin<1?'ahora':'en '+fmtMin(v.todMin))},
+      geometry:{type:'Point',coordinates:puntoEnRuta(nodos,v.tod)}});
+  }
+  return f;
+}
 
 // Velocidad que toca a esa distancia, según el perfil. Más lejos que el primer tramo
 // (100 NM) vale ese mismo: la tabla no cambia de velocidad por estar más lejos.
@@ -452,7 +788,8 @@ function pintarPerfiles(){
   const cont=document.getElementById('pg-perfiles'); if(!cont) return;
   if(cont.dataset.listo) return;                 // los botones se arman una sola vez
   cont.dataset.listo='1';
-  const opciones=[['','Auto'],['narrow','Narrow'],['wide','Wide'],['heavy','747']];
+  const opciones=[['','Auto'],['ga','Avioneta'],['turboprop','Turbohélice'],['bizjet','Ejecutivo'],
+    ['regional','Regional'],['narrow','Narrow'],['wide','Wide'],['heavy','747']];
   cont.innerHTML=opciones.map(function(o){
     return '<button class="pg-perfil" data-p="'+o[0]+'">'+o[1]+'</button>';
   }).join('');
@@ -474,7 +811,7 @@ function updateTablaDescenso(nmLeft){
 
   const p=perfilActivo();
   const auto=!perfilElegido;
-  document.getElementById('pg-perfil-nom').textContent=p.nombre+(auto?' · auto':'');
+  document.getElementById('pg-perfil-nom').textContent=p.nombre+(auto?' · auto ('+deteccionAvion().fuente+')':'');
   document.getElementById('pg-perfiles').querySelectorAll('.pg-perfil').forEach(function(b){
     b.classList.toggle('on',(b.dataset.p||null)===perfilElegido);
   });
@@ -552,7 +889,7 @@ function cerrarTablaDescenso(){
 (function(){
   try{
     const g=localStorage.getItem('perfilDescenso');
-    if(g==='narrow'||g==='wide'||g==='heavy') perfilElegido=g;
+    if(g && Object.prototype.hasOwnProperty.call(PERFILES,g)) perfilElegido=g;
   }catch(e){}
 
   // Botón explícito: la pulsación larga costaba encontrarla (nadie la descubría sola).
@@ -642,10 +979,10 @@ function updateNextLeg(){
   // sigue ahí y te dice qué hacer para tener un próximo punto.
   if(!to){
     row.classList.add('vacio');
-    txt('pg-next','sin puntos intermedios');
+    txt('pg-next','Puntos');
     document.getElementById('pg-next-fill').style.width='0%';
     txt('pg-next-nm','--'); txt('pg-next-km','＋ punto');
-    txt('pg-next-min','--'); txt('pg-next-brg','---°'); txt('pg-next-card','rumbo');
+    txt('pg-next-min','--'); txt('pg-next-brg','---°'); txt('pg-next-card','rumbo'); girarFlecha('fr-next', null);
     return;
   }
   row.classList.remove('vacio');
@@ -663,4 +1000,5 @@ function updateNextLeg(){
   const b=toMag(bearingTo(cur.lat,cur.lng,to.lat,to.lon));
   txt('pg-next-brg', String(Math.round(b)%360).padStart(3,'0')+'°');
   txt('pg-next-card', cardinal(b));
+  girarFlecha('fr-next', b);
 }
