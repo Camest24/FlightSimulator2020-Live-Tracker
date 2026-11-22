@@ -127,9 +127,20 @@ def iniciar_servicio():
             STATUS["ultimo_error"] = "falta 'npm install' en tools/jetphotos-api"
             return
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        _proc = subprocess.Popen([npm, "run", "dev"], cwd=API_DIR, creationflags=flags,
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
+        # Fuera del "job" de Steam: la app la lanza MSFS, y Steam se queda en "Deteniendo"
+        # hasta que muere todo lo que cuelga del juego. Si la app se cae (o se mata a la
+        # fuerza) sin llamar a detener_servicio, node/workerd quedaban huérfanos ahí adentro
+        # y MSFS no se podía volver a abrir (pasó el 2026-11-01). Si el job no deja salir,
+        # CreateProcess da acceso denegado y se lanza como antes.
+        breakaway = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+        try:
+            _proc = subprocess.Popen([npm, "run", "dev"], cwd=API_DIR, creationflags=flags | breakaway,
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+        except OSError:
+            _proc = subprocess.Popen([npm, "run", "dev"], cwd=API_DIR, creationflags=flags,
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
         STATUS["lanzado_por_app"] = True
         for _ in range(60):                       # wrangler tarda unos segundos en estar listo
             if _vivo():
