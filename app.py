@@ -7,6 +7,7 @@ Puerto: 5001  (http://localhost:5001)
 """
 
 from flask import Flask, render_template, jsonify, request
+import collections
 import threading
 import time
 import webbrowser
@@ -167,6 +168,31 @@ def _safe_get(aq, name):
         return None
 
 
+def _texto_sim(v):
+    """Las SimVars de texto llegan como bytes (y a veces con relleno nulo)."""
+    if v is None:
+        return None
+    if isinstance(v, bytes):
+        v = v.decode("utf-8", "ignore")
+    return str(v).replace("\x00", "").strip()
+
+
+_RE_AC_MODEL = re.compile(r"AC_MODEL[ _]?([A-Z0-9]{2,5})", re.IGNORECASE)
+
+
+def _icao_de_modelo_atc(txt):
+    """ATC MODEL viene de dos formas: el código pelado ("A20N", "B738") o una clave de
+    traducción ("TT:ATCCOM.AC_MODEL A320.0.text", la usa el A32NX). Devuelve el código ICAO
+    en mayúsculas, o None si no se reconoce (hay aviones que mandan cualquier cosa)."""
+    if not txt:
+        return None
+    m = _RE_AC_MODEL.search(txt)
+    if m:
+        return m.group(1).upper()
+    t = txt.strip().upper()
+    return t if re.fullmatch(r"[A-Z][A-Z0-9]{1,4}", t) else None
+
+
 def _leer_sin_esperar(aq, name, cada):
     """Variables lentas (ver SIMVARS_CADA_1S/10S): se manda el pedido y NO se espera la
     respuesta; se devuelve el último valor conocido. La respuesta la deja el hilo de dispatch
@@ -210,6 +236,43 @@ FIN_QUIETO_S = 45
 FIN_GS_KT = 25      # por debajo de esta velocidad en tierra lo damos por detenido
 
 
+# Régimen de aterrizaje (ft/min al tocar). En el instante en que SIM ON GROUND pasa a
+# verdadero, VERTICAL SPEED ya suele valer casi 0 (el tren absorbió el golpe), así que se
+# toma el valor MÁS negativo de los últimos ~1,2 s en el aire (4-5 lecturas a 4 Hz). Con
+# más ventana un flare corto se colaba y daba el régimen de la aproximación (−700). Lo
+# ideal sería PLANE TOUCHDOWN NORMAL VELOCITY, pero python-simconnect no la trae.
+# Solo el primer toque cuenta: un rebote dos segundos después no debe "mejorar" el
+# aterrizaje. Uno nuevo vale si pasó más de 30 s (touch-and-go y otra vuelta).
+#
+# Despegue: el paso de tierra a aire. Se guarda la hora REAL (la de la PC) y la hora local
+# del sim, para mostrar "despegaste 8:24 pm" junto al tiempo de vuelo y, con un toque, a
+# qué hora saliste en la vida real (con sim rate x4 las dos se separan mucho). Solo cuenta
+# si antes se vio el avión en tierra: abrir la app con el avión ya volando no es despegar.
+vs_en_el_aire = collections.deque(maxlen=20)
+en_tierra_antes = None
+
+
+def _registrar_despegue_y_aterrizaje(on_ground, vs, ias):
+    """Toma `lock`: llamarla fuera de cualquier bloque que ya lo tenga."""
+    global en_tierra_antes
+    ahora = time.time()
+    if on_ground is False and en_tierra_antes is True:
+        with lock:
+            state["despegue"] = {"real": ahora, "sim_local": state.get("local_time")}
+    if on_ground is False and vs is not None:
+        vs_en_el_aire.append((ahora, float(vs)))
+    if on_ground is True and en_tierra_antes is False:
+        ultimos = [v for t, v in vs_en_el_aire if ahora - t <= 1.2]
+        with lock:
+            previo = state.get("aterrizaje")
+            if ultimos and (not previo or ahora - previo["t"] > 30):
+                state["aterrizaje"] = {"fpm": int(round(min(ultimos))),
+                                       "ias": int(round(ias)) if ias else None, "t": ahora}
+        vs_en_el_aire.clear()
+    if on_ground is not None:
+        en_tierra_antes = on_ground
+
+
 def _revisar_fin_de_vuelo(on_ground, gs):
     """Archiva el vuelo solo cuando terminó de verdad: despegó, volvió a tierra y quedó
     quieto un rato. NO borra el rastro del mapa (para que puedas seguir mirando la ruta
@@ -234,7 +297,13 @@ def _revisar_fin_de_vuelo(on_ground, gs):
                 state["flight_start"] = time.time()
                 state["elapsed_min"] = 0
                 state["guardado_en"] = None
+                state["aterrizaje"] = None
             vuelo_archivado = False
+        if not fue_al_aire:
+            # Combustible al despegar: con esto el resumen dice cuánto se gastó en el vuelo
+            with lock:
+                state["fuel_despegue"] = state.get("fuel_gal")
+                state["aterrizaje"] = None
         fue_al_aire = True
         quieto_desde = None
         return
@@ -540,6 +609,8 @@ def _debug_telemetry_loop():
         state["eng_type"] = 1
         state["eng_count"] = 2
         state["aircraft"] = "DEBUG · estático en " + DEBUG_AIRPORT_ICAO
+        state["ac_icao"] = "A20N"
+        state["ac_mtow_lb"] = 174165
         state["mach"] = 0.0
         state["sim_rate"] = 1.0
         state["pausado"] = False
@@ -585,12 +656,13 @@ SIMVARS_CADA_1S = (
 )
 # 3 s: cambia despacio (combustible, hora local para la ETA y el día/noche, tramo del GPS)
 SIMVARS_CADA_3S = (
-    "LOCAL_TIME", "FUEL_TOTAL_QUANTITY",
+    "LOCAL_TIME", "ZULU_TIME", "FUEL_TOTAL_QUANTITY",
     "GPS_IS_ACTIVE_FLIGHT_PLAN", "GPS_WP_DISTANCE", "GPS_FLIGHT_PLAN_WP_INDEX",
     "GPS_FLIGHT_PLAN_WP_COUNT", "GPS_WP_NEXT_LAT", "GPS_WP_NEXT_LON", "GPS_WP_PREV_LAT", "GPS_WP_PREV_LON",
 )
 # 10 s: no cambia en vuelo
-SIMVARS_CADA_10S = ("ENGINE_TYPE", "NUMBER_OF_ENGINES", "MAGVAR", "FUEL_TOTAL_CAPACITY")
+SIMVARS_CADA_10S = ("ENGINE_TYPE", "NUMBER_OF_ENGINES", "MAGVAR", "FUEL_TOTAL_CAPACITY",
+                    "TITLE", "ATC_MODEL", "MAX_GROSS_WEIGHT")
 FRECUENCIA_S = dict([(n, 1) for n in SIMVARS_CADA_1S] + [(n, 3) for n in SIMVARS_CADA_3S]
                     + [(n, 10) for n in SIMVARS_CADA_10S])
 FUEL_FLOW_CADA = 10   # s. ENG_FUEL_FLOW_GPH:n comparte UN Request para todos los motores y la
@@ -671,19 +743,22 @@ def telemetry_loop():
             # (con frecuencia de 1 s, ver SIMVARS_CADA_1S).
             eng_type = _safe_get(aq, "ENGINE_TYPE")       # para elegir el ícono del avión
             eng_count = _safe_get(aq, "NUMBER_OF_ENGINES")
-            # El modelo del avión sirve para elegir el perfil de descenso (un A320 y un
-            # A330 bajan parecido pero no van a la misma velocidad). Solo se lee una vez:
-            # es un string y no cambia durante el vuelo.
-            if state.get("aircraft") is None:
-                titulo = _safe_get(aq, "TITLE")
-                if isinstance(titulo, bytes):
-                    titulo = titulo.decode("utf-8", "ignore")
-                if titulo:
-                    with lock:
-                        state["aircraft"] = str(titulo).strip()
+            # El modelo del avión sirve para elegir el perfil de descenso y los topes de
+            # ascenso/descenso (un A320 y un 747 no suben ni bajan igual). Antes se leía UNA
+            # vez por conexión: si volvías al menú y cambiabas de avión sin cerrar MSFS, la app
+            # seguía con el anterior (el menú no cuenta como desconexión). Ahora va cada 10 s
+            # sin esperar (SIMVARS_CADA_10S). El título solo no alcanza (hay liveries con
+            # nombres de cualquier cosa): ATC MODEL suele traer el código ICAO (A20N, B738) y
+            # el peso máximo sirve de último recurso para saber el tamaño.
+            titulo = _texto_sim(_safe_get(aq, "TITLE"))
+            modelo_atc = _texto_sim(_safe_get(aq, "ATC_MODEL"))
+            mtow_lb = _safe_get(aq, "MAX_GROSS_WEIGHT")
             mach = _safe_get(aq, "AIRSPEED_MACH")
             sim_rate = _safe_get(aq, "SIMULATION_RATE")
             local_time = _safe_get(aq, "LOCAL_TIME")   # para saber si es de día o de noche
+            # Con la Zulu, local − zulu es el huso horario exacto donde está el avión (el sim
+            # sabe los husos reales): el modal de la hora trabaja en hora local, no en UTC.
+            zulu_time = _safe_get(aq, "ZULU_TIME")
             abs_time = _safe_get(aq, "ABSOLUTE_TIME")  # reloj corrido del sim, para el tiempo de vuelo
             # La librería marca esto cuando SimConnect avisa que pausaste el juego
             try:
@@ -760,9 +835,17 @@ def telemetry_loop():
                 state["gear_pct"] = gear_pct
                 state["eng_type"] = int(eng_type) if eng_type is not None else None
                 state["eng_count"] = int(eng_count) if eng_count is not None else None
+                # Las lecturas sin esperar dan None la primera vuelta: no se pisa lo que había.
+                if titulo:
+                    state["aircraft"] = titulo
+                if modelo_atc is not None:
+                    state["ac_icao"] = _icao_de_modelo_atc(modelo_atc)
+                if mtow_lb:
+                    state["ac_mtow_lb"] = int(mtow_lb)
                 state["mach"] = mach
                 state["sim_rate"] = sim_rate
                 state["local_time"] = local_time
+                state["zulu_time"] = zulu_time
                 # Se publica para poder ver desde la app si detectamos la pausa o no:
                 # si el contador sigue corriendo con el juego pausado, mirando esto se
                 # sabe si el problema es que el sim no nos avisa.
@@ -831,6 +914,7 @@ def telemetry_loop():
                             state["max_alt"] = 0
                             state["flight_start"] = time.time()
                             state["elapsed_min"] = 0
+                            state["despegue"] = None
                             state["weather"] = None
                             last_weather_fetch = 0
                     prev_sim_clock = reloj_sim
@@ -871,6 +955,7 @@ def telemetry_loop():
                     state["max_alt"] = 0
                     state["flight_start"] = time.time()
                     state["elapsed_min"] = 0
+                    state["despegue"] = None
                     state["weather"] = None
                     last_weather_fetch = 0            # refresca el clima en la nueva posición
                     route.append([lat, lon, alt])
@@ -887,8 +972,9 @@ def telemetry_loop():
                         mitad = len(route) // 2
                         route[:mitad] = route[:mitad:2]
 
-            # Fuera del `with lock` de arriba a propósito: esta función toma el mismo
+            # Fuera del `with lock` de arriba a propósito: estas funciones toman el mismo
             # candado y `lock` no es reentrante.
+            _registrar_despegue_y_aterrizaje(state["on_ground"], vs, ias)
             _revisar_fin_de_vuelo(on_ground, gs)
 
             if time.time() - last_save > 10:
@@ -910,6 +996,8 @@ def telemetry_loop():
                 with lock:
                     state["connected"] = False
                     state["aircraft"] = None   # al reconectar puede haber otro avión cargado
+                    state["ac_icao"] = None
+                    state["ac_mtow_lb"] = None
                 sm = None
                 aq = None
                 sim_aq = None
@@ -1041,6 +1129,7 @@ def api_reset():
         state["flight_start"] = time.time()
         state["elapsed_min"] = 0
         state["guardado_en"] = None
+        state["despegue"] = None
     fue_al_aire = False
     quieto_desde = None
     vuelo_archivado = False

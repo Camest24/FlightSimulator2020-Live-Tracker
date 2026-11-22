@@ -131,6 +131,9 @@ def fake_telemetry():
         appmod.route.clear()
         appmod.state["distance_nm"] = 0.0
         appmod.state["max_alt"] = 0
+        # Para ver la hora de despegue en el panel: "despegó" hace 3 min (hora real) y en
+        # la hora local del sim de ese momento.
+        appmod.state["despegue"] = {"real": t0 - 180, "sim_local": (t0 - 180 - 5 * 3600) % 86400}
 
     while True:
         now = time.time()
@@ -168,9 +171,14 @@ def fake_telemetry():
             s["eng_type"] = 1
             s["eng_count"] = 2
             s["aircraft"] = "Demo A320"
+            # Para probar otros perfiles (T/C, T/D, tabla de descenso) sin MSFS:
+            # DEMO_ICAO=B744 python tools/demo_medellin.py
+            s["ac_icao"] = os.environ.get("DEMO_ICAO", "A320")
+            s["ac_mtow_lb"] = 172000
             s["mach"] = 0.32
             s["sim_rate"] = 1.0
-            s["local_time"] = (t0 + t) % 86400
+            s["zulu_time"] = (t0 + t) % 86400
+            s["local_time"] = (s["zulu_time"] - 5 * 3600) % 86400   # Medellín es UTC-5
             s["reloj_sim"] = s["local_time"]
             s["magvar"] = -6.0
             s["fplan"] = None

@@ -13,9 +13,10 @@ IMPORTANTE — lo que puede vivir aca y lo que no:
         Esas siguen en app.py a proposito. Un `global sim_aq` dentro de un modulo distinto
         rebindea el nombre en ESE modulo, no aca, asi que el resto del programa seguiria
         viendo el valor viejo (None) para siempre — un bug silencioso, sin error ni traza.
-        Por eso las 11 funciones que tocan ese estado (telemetry_loop, teleport_aircraft,
+        Por eso las 12 funciones que tocan ese estado (telemetry_loop, teleport_aircraft,
         set_autopilot, set_aircraft, set_sim_time, trigger_event, api_gear, _gear_down,
-        _engines_idle, _revisar_fin_de_vuelo, api_reset) quedan juntas en app.py.
+        _engines_idle, _revisar_fin_de_vuelo,
+        _registrar_despegue_y_aterrizaje, api_reset) quedan juntas en app.py.
 """
 import os
 import threading
@@ -40,9 +41,12 @@ state = {
     "flaps_pct": None, "flaps_index": None, "spoilers_pct": None, "parking_brake": None,
     "eng_type": None, "eng_count": None,   # 0=pistón 1=jet 3=helicóptero 5=turbohélice
     "aircraft": None,     # nombre del avión cargado (para elegir el perfil de descenso)
+    "ac_icao": None,      # código ICAO sacado de ATC MODEL (A20N, B738...), si el avión lo trae
+    "ac_mtow_lb": None,   # peso máximo de despegue en libras: pista del tamaño si no hay código
     "mach": None,
     "sim_rate": None,     # velocidad de simulación (1x, 2x, 4x...)
     "local_time": None,   # hora local del sim, en segundos desde medianoche
+    "zulu_time": None,    # hora UTC del sim (s desde medianoche): local − zulu = huso horario
     "pausado": None,      # ¿el simulador avisó que está en pausa? (para el tiempo de vuelo)
     "reloj_sim": None,    # último valor del reloj del sim: si no avanza, está congelado
     "magvar": None,       # declinación magnética: los instrumentos del avión son magnéticos
@@ -55,6 +59,9 @@ state = {
     "endurance_min": None,  # autonomía estimada en minutos
     "distance_nm": 0.0,   # distancia total recorrida en millas náuticas
     "guardado_en": None,  # timestamp de cuándo se archivó solo el vuelo (para avisar en pantalla)
+    "aterrizaje": None,   # {"fpm","ias","t"} del último toque de pista (ver _registrar_aterrizaje)
+    "fuel_despegue": None,  # galones al despegar, para el combustible usado del resumen
+    "despegue": None,     # {"real": epoch de la PC, "sim_local": s desde medianoche} al despegar
     "max_alt": 0,
     "flight_start": None,
     "elapsed_min": 0,

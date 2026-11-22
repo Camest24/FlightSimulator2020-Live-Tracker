@@ -26,6 +26,8 @@ def load_current_flight():
             state["max_alt"] = data.get("max_alt", 0)
             state["flight_start"] = data.get("flight_start")
             state["elapsed_min"] = data.get("elapsed_min", 0)
+            # Para no perder la hora de despegue si la app se reinicia en pleno vuelo
+            state["despegue"] = data.get("despegue")
     except Exception:
         pass
 
@@ -39,6 +41,7 @@ def save_current_flight():
                 "max_alt": state["max_alt"],
                 "flight_start": state["flight_start"],
                 "elapsed_min": state["elapsed_min"],
+                "despegue": state.get("despegue"),
             }
         with open(CURRENT_FILE, "w", encoding="utf-8") as f:
             json.dump(payload, f)
@@ -64,6 +67,13 @@ def write_history(h):
         return True
     except Exception:
         return False
+
+
+def _gastado(inicial, final):
+    """Galones usados. None si falta un dato o si cargaste combustible en el medio."""
+    if inicial is None or final is None or final > inicial:
+        return None
+    return round(inicial - final, 1)
 
 
 def archive_flight_to_history():
@@ -106,6 +116,13 @@ def archive_flight_to_history():
         "from_name": org["name"] if org else None,
         "to_icao": dst["icao"] if dst else None,
         "to_name": dst["name"] if dst else None,
+        # Para el resumen de fin de vuelo y el historial
+        "flight_min": round(state.get("elapsed_min") or 0, 1),   # con el reloj del sim
+        "landing_fpm": (state.get("aterrizaje") or {}).get("fpm"),
+        "fuel_used_gal": _gastado(state.get("fuel_despegue"), state.get("fuel_gal")),
+        # Hora real de despegue: con end_time da cuánto duró el vuelo en la vida real
+        "takeoff_real": (state.get("despegue") or {}).get("real"),
+        "takeoff_sim_local": (state.get("despegue") or {}).get("sim_local"),
     }
     history = read_history()
     history.append(entry)
