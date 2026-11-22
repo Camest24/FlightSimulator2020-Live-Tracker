@@ -11,12 +11,16 @@ python app.py                    # app real, lee telemetría por SimConnect (o i
 python app.py --debug            # avión estático en SKRG, nunca toca SimConnect (iniciar-debug.bat)
 python tools/demo_medellin.py    # vuelo falso en círculos sobre Medellín, con reloader (iniciar-demo.bat)
 python tools/medir_telemetria.py [ref]   # telemetry_loop actual vs otro commit, con SimConnect falso
+python tools/aig_modo.py estado|colombia|todo [--simulacro]   # flight plans de AIG que carga AIGTC
+python tools/aig_modo.py instalar-tarea  # una vez: tarea programada que abre AIGTC elevado sin aviso de UAC
 ```
 
 - No hay tests, linter ni paso de build. Para verificar un cambio: arrancar en `--debug` o con la demo y abrir http://localhost:5001.
 - Cambios en `static/` o `templates/` se ven recargando el navegador. Cambios en Python requieren reiniciar el server (la demo se reinicia sola).
 - Diagnóstico en vivo: `/api/live_airways_status`, `/api/simbridge_status`.
 - Los `.bat` matan cualquier proceso que siga escuchando en :5001 antes de arrancar.
+- `tools/aig_modo.py` (fuera de la app): con todo el tráfico mundial AIGTC tarda 6-10 min en cargar en cada arranque. El acceso directo "MSFS + AIG" del escritorio (`--abrir-msfs`) pregunta el modo (Colombia por defecto, tecla M = mundial), mueve los flight plans que sobran a `D:\AIG_apartados` y abre AIGTC y MSFS. En `exe.xml` AIGTC ya no se lanza directo sino vía `--preguntar` (respaldo si se abre MSFS desde Steam; respaldo del xml en `exe.xml.bak-aigmodo-20261101`). Antes de usar AIG Manager: modo `todo`. AIGTC SÍ necesita ser administrador (sin elevar no escribe su caché en ProgramData ni abre su WCF en :8733): se abre con la tarea programada si existe, si no con aviso de UAC.
+- No matar a la fuerza la app que lanzó MSFS: su servicio de fotos (npm → wrangler → workerd, :8787) queda huérfano y Steam se queda en "Deteniendo". Para recargar Python, cerrar y abrir MSFS.
 - `iniciar-con-msfs.pyw` lo lanza MSFS al abrir (vía `exe.xml`, con `pythonw`): arranca `python.exe app.py` sin ventana (`CREATE_NO_WINDOW`; bajo pythonw directo Werkzeug falla con WinError 6) y con `MSFS_LIVE_QUIET=1`. La salida va a `data/msfs-live.log`.
 
 ## Arquitectura
@@ -31,11 +35,24 @@ python tools/medir_telemetria.py [ref]   # telemetry_loop actual vs otro commit,
 
 **Frontend**: `templates/index.html` (solo markup) + `static/css/main.css` + 10 scripts clásicos en `static/js/` cargados en orden fijo (map-setup → plane-3d → cesium-3d → geo-utils → flight-progress → flightplan → telemetry → graph-panel → tools-ui → traffic). Comparten el scope global: nada de `type="module"` ni bundler, y el orden de carga importa. Librerías por CDN: MapLibre 4.7.1, Three.js 0.128.0, Chart.js 4.4.1.
 
-**Tráfico IA** (detalle, decisiones y pendientes en `docs/TRAFFIC-UPDATE.md`): `static/js/traffic.js` pide `/api/traffic?radius=<aptRadius>` cada 2 s y extrapola posiciones a 4 Hz. El radio es el mismo de aeropuertos, recortado a ~108 NM (200 km, tope de SimConnect); `server/traffic.py` pide solo ese radio y se pausa si nadie consulta en 15 s. Estacionados apagados ocultos por defecto (`activo`, botón "P"). Fotos: `server/jetphotos.py` (JetPhotos, con permiso de uso universitario no comercial: una consulta a la vez y caché larga) y Wikimedia Commons de respaldo. AIG Traffic Controller y la app se lanzan con MSFS desde `%APPDATA%\Microsoft Flight Simulator\exe.xml`; la app se cierra sola al cerrar MSFS (`_cerrar_con_msfs`).
+**Tráfico IA** (detalle, decisiones y pendientes en `docs/TRAFFIC-UPDATE.md`): `static/js/traffic.js` pide `/api/traffic?radius=<aptRadius>` cada 2 s y extrapola posiciones a 4 Hz. El radio es el mismo de aeropuertos, recortado a ~108 NM (200 km, tope de SimConnect); `server/traffic.py` pide solo ese radio y se pausa si nadie consulta en 15 s. Estacionados apagados ocultos por defecto (`activo`, botón "P"). Aerolínea: del prefijo ICAO del callsign en ATC ID; si AIG manda la matrícula en vez del callsign (pasa con el tráfico de MSFS en "IA desconectada"), `server/aig_fp.py` la saca de los flight plans de AIG (matrícula + número de vuelo → ICAO/IATA, indexa solo lo que hay en la carpeta AIGFP). Fotos: `server/jetphotos.py` (JetPhotos, con permiso de uso universitario no comercial: una consulta a la vez y caché larga) y Wikimedia Commons de respaldo. AIG Traffic Controller y la app se lanzan con MSFS desde `%APPDATA%\Microsoft Flight Simulator\exe.xml`; la app se cierra sola al cerrar MSFS (`_cerrar_con_msfs`).
 
 **Polling**: el frontend pide `/api/state` 10 veces/seg (`poll()` en `tools-ui.js`). Ese endpoint excluye la ruta a propósito (hasta 6000 puntos); la ruta va aparte por `/api/route` ~1 vez/seg. No volver a meterla en `/api/state`.
 
 **Persistencia**: `data/current_flight.json` (vuelo actual, autosave) y `data/flights_history.json`. El vuelo se archiva solo tras despegar, aterrizar y quedar detenido ~45 s (`_revisar_fin_de_vuelo`). `design/` son mockups viejos, no forman parte de la app.
+
+## Estado y pendientes (al 2026-11-01, rama `traffic-update`)
+
+Sin commit todavía: `tools/aig_modo.py`, `server/aig_fp.py` (nuevos), cambios en `server/traffic.py`, `server/jetphotos.py`, `static/js/traffic.js` y este archivo. Van en commits separados: herramienta de modos AIG / aerolínea desde flight plans + reintento de foto / servicio de fotos fuera del job de Steam.
+
+Configuración de la PC fuera del repo: MSFS en "IA desconectada", densidad 0 y aeronaves en tierra 0 (con "en línea en tiempo real" MSFS metía su tráfico encima del de AIG: libreas absurdas y callsigns duplicados). Acceso directo "MSFS + AIG" en `C:\Users\juanc\OneDrive\Escritorio`. Flight plans apartados en `D:\AIG_apartados` (en C: no hay espacio: nada pesado ahí).
+
+Pendiente de probar con MSFS real:
+- Abrir con "MSFS + AIG" de punta a punta: ventanita en el monitor secundario, AIGTC minimizado (su splash sale igual), logos y fotos en el mapa.
+- Que el servicio de fotos lanzado con `CREATE_BREAKAWAY_FROM_JOB` ya no deje a Steam en "Deteniendo" (si el job de Steam no permite salir, cae al lanzamiento normal).
+- La tarea programada (`instalar-tarea`): la tiene que crear el usuario; el auto mode de Claude Code la bloquea por ser persistencia elevada.
+
+Ideas para después: modo por ruta en `aig_modo.py` (cargar solo las aerolíneas de origen/destino, p. ej. LEMD-RJTT: 226 de 1942 archivos); indicador en el mapa de "AIG cargando flight plans" leyendo su log; `jetphotos.detener_servicio` no cierra un servicio que la app encontró ya vivo (`lanzado_por_app=False`).
 
 ## Convenciones (de `docs/CODESTYLE.md`)
 
