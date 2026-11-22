@@ -35,15 +35,17 @@ python tools/aig_modo.py instalar-tarea  # una vez: tarea programada que abre AI
 
 **Frontend**: `templates/index.html` (solo markup) + `static/css/main.css` + 10 scripts clásicos en `static/js/` cargados en orden fijo (map-setup → plane-3d → cesium-3d → geo-utils → flight-progress → flightplan → telemetry → graph-panel → tools-ui → traffic). Comparten el scope global: nada de `type="module"` ni bundler, y el orden de carga importa. Librerías por CDN: MapLibre 4.7.1, Three.js 0.128.0, Chart.js 4.4.1.
 
+**UI** (se usa solo desde un iPad horizontal, 1180×820, táctil): abajo va el dock (`#dock-pila`: estante `#dock-estante` que se abre con •••, y `#dock` con la barrita del vuelo, altitud, velocidad, llegada, guía y rosa de rumbo). Con ruta, `#dock-pila` lleva la clase `con-ruta`, que muestra los `.solo-ruta`; los ids viejos (`pg-*`, `v-*`) se mantienen y los siguen llenando `telemetry.js` y `flight-progress.js`. Luces, hora, mostrar parqueados, añadir puntos y eliminar ruta viven en el menú del engranaje de la barra de arriba (`#ajustes`). No hay botones de zoom ni brújula: todo con los dedos. `--dock-alto`/`--pila-alto` (CSS) los mide un ResizeObserver en `tools-ui.js`.
+
 **Tráfico IA** (detalle, decisiones y pendientes en `docs/TRAFFIC-UPDATE.md`): `static/js/traffic.js` pide `/api/traffic?radius=<aptRadius>` cada 2 s y extrapola posiciones a 4 Hz. El radio es el mismo de aeropuertos, recortado a ~108 NM (200 km, tope de SimConnect); `server/traffic.py` pide solo ese radio y se pausa si nadie consulta en 15 s. Estacionados apagados ocultos por defecto (`activo`, botón "P"). Aerolínea: del prefijo ICAO del callsign en ATC ID; si AIG manda la matrícula en vez del callsign (pasa con el tráfico de MSFS en "IA desconectada"), `server/aig_fp.py` la saca de los flight plans de AIG (matrícula + número de vuelo → ICAO/IATA, indexa solo lo que hay en la carpeta AIGFP). Fotos: `server/jetphotos.py` (JetPhotos, con permiso de uso universitario no comercial: una consulta a la vez y caché larga) y Wikimedia Commons de respaldo. AIG Traffic Controller y la app se lanzan con MSFS desde `%APPDATA%\Microsoft Flight Simulator\exe.xml`; la app se cierra sola al cerrar MSFS (`_cerrar_con_msfs`).
 
 **Polling**: el frontend pide `/api/state` 10 veces/seg (`poll()` en `tools-ui.js`). Ese endpoint excluye la ruta a propósito (hasta 6000 puntos); la ruta va aparte por `/api/route` ~1 vez/seg. No volver a meterla en `/api/state`.
 
 **Persistencia**: `data/current_flight.json` (vuelo actual, autosave) y `data/flights_history.json`. El vuelo se archiva solo tras despegar, aterrizar y quedar detenido ~45 s (`_revisar_fin_de_vuelo`). `design/` son mockups viejos, no forman parte de la app.
 
-## Estado y pendientes (al 2026-11-01, rama `traffic-update`)
+## Estado y pendientes (al 2026-11-21, rama `traffic-update`)
 
-Sin commit todavía: `tools/aig_modo.py`, `server/aig_fp.py` (nuevos), cambios en `server/traffic.py`, `server/jetphotos.py`, `static/js/traffic.js` y este archivo. Van en commits separados: herramienta de modos AIG / aerolínea desde flight plans + reintento de foto / servicio de fotos fuera del job de Steam.
+Todo commiteado. Próximo: pasar el mapa de MapLibre a Mapbox GL JS con `projection: 'globe'` (el usuario manda un prompt con el detalle). El token público (`pk.`) va en un archivo local fuera del repo, nunca en el código ni en el chat. El modo 3D (Cesium/Three.js) no se usa: no hace falta conservarlo.
 
 Configuración de la PC fuera del repo: MSFS en "IA desconectada", densidad 0 y aeronaves en tierra 0 (con "en línea en tiempo real" MSFS metía su tráfico encima del de AIG: libreas absurdas y callsigns duplicados). Acceso directo "MSFS + AIG" en `C:\Users\juanc\OneDrive\Escritorio`. Flight plans apartados en `D:\AIG_apartados` (en C: no hay espacio: nada pesado ahí).
 
