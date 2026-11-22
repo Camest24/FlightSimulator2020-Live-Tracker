@@ -61,15 +61,19 @@
 </div>
 
   <div id="dock-estante" class="glass">
-    <div class="dk-ficha tile-pulsable" id="tile-dist" title="Mantené pulsado para ver el gráfico de velocidad y altitud">
+    <!-- Distancia volada: solo sin ruta. Con ruta se oculta (.sin-ruta): ya la muestra la
+         barrita bajo la ciudad de origen y era info repetida. Mantener pulsado abre el gráfico. -->
+    <div class="dk-ficha tile-pulsable sin-ruta" id="tile-dist" title="Mantené pulsado para ver el gráfico de velocidad y altitud">
       <span class="dk-k">Distancia</span>
       <span class="dk-v"><span id="v-dist">--</span><span class="uu">NM</span></span>
       <span class="dk-s" id="s-dist"></span>
     </div>
-    <div class="dk-ficha dk-simrate">
-      <button id="sr-minus" title="Bajar velocidad de simulación">−</button>
-      <span class="dk-sr"><span class="dk-k">Sim rate</span><span class="dk-v" id="v-simrate">1×</span></span>
-      <button id="sr-plus" title="Subir velocidad de simulación">+</button>
+    <!-- Llegada (antes en el dock; desde el 2026-11-22 acá, en el estante). Tocar
+         cambia entre la hora del simulador y la hora real (puntito celeste). -->
+    <div class="dk-ficha solo-ruta pg-tocable" id="pg-eta-row" title="Tocá para cambiar entre hora del simulador y hora real">
+      <span class="dk-k"><span id="pg-eta-k">Llegada (hora sim)</span><i class="dk-punto"></i></span>
+      <span class="dk-v" id="pg-eta">--:--</span>
+      <span class="dk-s" id="pg-eta-en"></span>
     </div>
     <!-- Tocar la ficha alterna la hora de despegue: la del simulador o la de la vida real -->
     <div class="dk-ficha" id="time-row">
@@ -118,12 +122,6 @@
         <span class="hero-sub" id="s-gs">--</span>
       </div>
       <div class="dk-sep solo-ruta"></div>
-      <!-- Tocar cambia entre la hora del simulador y la hora real (puntito celeste) -->
-      <div class="dk-llegada solo-ruta pg-tocable" id="pg-eta-row" title="Tocá para cambiar entre hora del simulador y hora real">
-        <span class="dk-k"><span id="pg-eta-k">Llegada (hora sim)</span><i class="dk-punto"></i></span>
-        <span class="dk-eta" id="pg-eta">--:--</span>
-        <span class="dk-s" id="pg-eta-en"></span>
-      </div>
       <div class="dk-guia solo-ruta">
         <div class="pg-brg" id="pg-vnav-row"><span class="pg-k">Crucero</span><span class="pg-vwrap"><span class="pg-v" id="pg-vnav">--</span><button type="button" class="pg-tabla-btn" id="pg-tabla-btn" title="Ver tabla completa de descenso">▤</button></span></div>
         <div class="pg-brg" id="pg-vs-row"><span class="pg-k">Bajar</span><span class="pg-v" id="pg-vs">--</span></div>
@@ -166,6 +164,9 @@
     <button class="tool-btn" id="btn-msfsplan" title="Traer el plan de vuelo del mapa de MSFS"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 20h16"/></svg></button>
   </div>
   <div id="ajustes" class="glass hidden">
+    <!-- Sim rate (antes en el estante del dock): el botón muestra el valor y al tocarlo
+         despliega abajo la fila − / + (aj-sr). -->
+    <button id="btn-simrate" class="btn-sq aj-btn" title="Velocidad de simulación"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.3 19a10 10 0 1 1 17.4 0"/><path d="M12 14l4-5"/></svg><span>Sim rate <b id="aj-sr-val">1×</b></span></button>
     <button id="btn-status" class="btn-sq aj-btn" title="Luces del avión"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.6 10.8c.5.4.8 1 .9 1.6l.1.6h5.2l.1-.6c.1-.6.4-1.2.9-1.6A6 6 0 0 0 12 3z"/></svg><span>Luces</span></button>
     <button id="btn-time" class="btn-sq aj-btn" title="Hora del simulador"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg><span>Hora</span></button>
     <!-- Tráfico IA: mostrar/ocultar los estacionados apagados (ver static/js/traffic.js) -->
@@ -174,6 +175,11 @@
          pide confirmar). Sin ruta quedan apagados. -->
     <button id="btn-agregar-puntos" class="btn-sq aj-btn aj-ruta" title="Agregar puntos a la ruta tocando el mapa"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="2.8" fill="currentColor" stroke="none"/></svg><span>Añadir puntos</span></button>
     <button id="btn-borrar-ruta" class="btn-sq aj-btn aj-ruta" title="Eliminar la ruta (pide confirmar)"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg><span>Eliminar ruta</span></button>
+    <div class="aj-sr hidden" id="aj-sr">
+      <button id="sr-minus" title="Bajar velocidad de simulación">−</button>
+      <span class="aj-sr-v"><span>Sim rate</span><b id="v-simrate">1×</b></span>
+      <button id="sr-plus" title="Subir velocidad de simulación">+</button>
+    </div>
   </div>
   <div id="layers" class="glass hidden">
     <!-- El selector de mapa base se sacó: solo queda satélite con nombres (ver map-setup.js). -->

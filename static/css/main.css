@@ -44,12 +44,12 @@
   .tool-btn.disabled:hover svg{ transform:none; }
   /* Todo lo clicable se hunde rápido al apretar y vuelve despacio con un rebotito.
      La asimetría (0.06s al bajar, 0.4s al subir) es lo que lo hace sentir físico. */
-  .tool-btn, .btn, .btn-sq, .st-chip, .dk-simrate button, .dk-mas,
+  .tool-btn, .btn, .btn-sq, .st-chip, .aj-sr button, .dk-mas,
   .hist-del, .layer-opt, .opt-item, .sp-item, .rr-btn, .lp-btn{
     transition:transform .4s cubic-bezier(.2,1.5,.4,1), background .18s, color .18s, box-shadow .18s;
     -webkit-tap-highlight-color:transparent; }
   .tool-btn:active, .btn:active, .btn-sq:active, .st-chip:active,
-  .dk-simrate button:active, .dk-mas:active,
+  .aj-sr button:active, .dk-mas:active,
   .hist-del:active, .layer-opt:active, .opt-item:active, .sp-item:active,
   .rr-btn:active, .lp-btn:active{
     transform:scale(.93); transition-duration:.06s; }
@@ -342,6 +342,7 @@
      todo el ancho y la guía quedaba con un hueco enorme entre etiqueta y valor. */
   #dock{ width:auto; max-width:100%; border-radius:30px; color:var(--text); padding:12px 12px 12px 22px; }
   #dock-pila:not(.con-ruta) .solo-ruta{ display:none !important; }
+  #dock-pila.con-ruta .sin-ruta{ display:none !important; }
 
   /* -- Fila principal -- */
   .dk-main{ display:flex; align-items:stretch; gap:18px; min-height:88px; }
@@ -366,7 +367,7 @@
 
   .dk-llegada{ flex:0 0 auto; min-width:128px; display:flex; flex-direction:column; justify-content:center; gap:3px; }
   .dk-eta{ font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:26px; font-weight:500; line-height:1.1; }
-  .dk-llegada.real .dk-k, .dk-llegada.real .dk-eta, .dk-llegada.real .dk-s{ color:#fbbf24 !important; }
+  #pg-eta-row.real .dk-k, #pg-eta-row.real .dk-v, #pg-eta-row.real .dk-s{ color:#fbbf24 !important; }
 
   /* La guía: grilla chica, etiqueta corta y valor (con su color) pegado al lado. Antes
      eran tres filas a todo el ancho con el valor en la otra punta: mucho espacio vacío. */
@@ -403,9 +404,14 @@
   .dk-mas.on{ background:var(--amber); color:#1a1204; box-shadow:0 6px 18px rgba(251,191,36,0.35); }
 
   /* -- Barrita del vuelo (diseño "barrita") --
-     Arriba la línea con el avión (en % del largo); debajo, origen | aterrizás en | destino. */
-  .dk-perfil{ padding:2px 4px 12px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.10); }
-  .pf{ position:relative; height:26px; margin:0 8px; }
+     Una sola fila: origen | línea con el avión (y "Aterrizás en" encima) | destino. Antes
+     eran dos (la línea arriba, las ciudades abajo): el 2026-11-22 se juntó para que el dock
+     ocupe menos alto. .pf-pie es display:contents: sus hijos se ubican en la grilla de
+     .dk-perfil sin tocar el HTML. */
+  .dk-perfil{ display:grid; grid-template-columns:minmax(0,max-content) minmax(140px,1fr) minmax(0,max-content);
+    grid-template-rows:auto auto; column-gap:18px; align-items:center;
+    padding:0 4px 10px; margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.10); }
+  .pf{ grid-column:2; grid-row:2; position:relative; height:24px; margin:0 6px; }
   /* Lo que falta en gris; lo volado (pf-hecho) en celeste, crece hasta el avión. En las
      puntas un punto con aro: celeste el origen, blanco el destino. */
   .pf-linea{ position:absolute; left:0; right:0; top:50%; height:4px; margin-top:-2px; border-radius:2px;
@@ -420,8 +426,9 @@
   .pf-avion{ position:absolute; top:50%; width:0; height:0; z-index:2; transition:left .6s; }
   .pf-icono{ position:absolute; left:-13px; top:-13px; width:26px; height:26px; fill:#fff; transform:rotate(90deg);
     filter:drop-shadow(0 1px 3px rgba(0,0,0,0.6)); }
-  .pf-pie{ display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:end; gap:14px; margin-top:4px; }
-  .dk-end{ min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .pf-pie{ display:contents; }
+  .dk-end{ grid-row:1 / span 2; grid-column:1; max-width:230px; min-width:0; display:flex; flex-direction:column; gap:1px; }
+  .dk-end.to{ grid-column:3; }
   .dk-end.to{ align-items:flex-end; text-align:right; }
   .pf-lugar{ display:flex; align-items:baseline; gap:5px; max-width:100%; min-width:0; }
   .pf-lugar b{ font-size:19px; font-weight:600; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
@@ -437,12 +444,7 @@
   #dock-estante.hidden{ display:none; }
   .dk-ficha{ min-height:60px; display:flex; flex-direction:column; justify-content:center; gap:3px; padding:8px 14px;
     border-radius:16px; background:rgba(255,255,255,0.07); }
-  #tile-dist{ min-width:104px; }
-  .dk-simrate{ flex-direction:row; align-items:center; gap:6px; padding:6px; }
-  .dk-simrate button{ width:44px; height:44px; border:none; border-radius:12px; cursor:pointer; background:rgba(255,255,255,0.12);
-    color:var(--text); font-family:inherit; font-size:20px; font-weight:500; }
-  .dk-sr{ display:flex; flex-direction:column; align-items:center; gap:3px; min-width:58px; }
-  #v-simrate.orange{ color:var(--orange); }
+  #pg-eta-row, #tile-dist.dk-ficha{ min-width:110px; }
   #time-row{ min-width:150px; max-width:210px; }
   #time-row.con-despegue{ cursor:pointer; -webkit-tap-highlight-color:transparent; }
   #time-row:not(.con-despegue) .dk-punto, #time-row:not(.real) #s-real{ display:none; }
@@ -494,11 +496,12 @@
      alineacion de "Radio" con las etiquetas de los toggles de arriba (8 + 34 + 12 = 54px). */
   #layers{ border-radius:22px; padding:9px; width:300px; }
   #layers.hidden{ display:none; }
-  /* Menú del engranaje: luces y hora, con íconos grandes para el dedo */
+  /* Menú del engranaje: sim rate, luces, hora, parqueados y la ruta. Botones compactos
+     (antes 96×76: el menú quedaba gigante), igual de cómodos para el dedo. */
   /* Flota debajo de la barra, fuera del flujo: es más ancho que la barra, y dentro del
      flujo la agrandaba al abrirse y la fila de botones se corría (se descentraba). */
   #ajustes{ position:absolute; top:calc(100% + 12px); left:50%; transform:translateX(-50%); width:max-content;
-    display:flex; flex-wrap:wrap; justify-content:center; gap:8px; border-radius:22px; padding:9px; max-width:calc(100vw - 24px); }
+    display:flex; flex-wrap:wrap; justify-content:center; gap:6px; border-radius:20px; padding:7px; max-width:calc(100vw - 24px); }
   #toolbar[data-orient="v"] #ajustes{ top:0; left:calc(100% + 12px); transform:none; }
   #ajustes.hidden{ display:none; }
   /* Añadir puntos (prendido: morado, como la ruta) y eliminar ruta (confirmando: rojo) */
@@ -506,7 +509,19 @@
   .aj-btn.confirmar{ background:#dc2626; color:#fff; box-shadow:0 6px 18px rgba(220,38,38,0.4); }
   .aj-btn:disabled{ opacity:.35; cursor:default; }
   #btn-ajustes.agregando{ background:#a855f7; color:#fff; }
-  .aj-btn{ width:96px; height:76px; text-align:center; line-height:1.15; padding:0 6px; flex-direction:column; gap:6px; border-radius:16px; font-family:inherit; font-size:12px; font-weight:600; }
+  .aj-btn{ width:72px; height:60px; text-align:center; line-height:1.1; padding:0 4px; flex-direction:column; gap:4px; border-radius:14px; font-family:inherit; font-size:10.5px; font-weight:600; }
+  .aj-btn svg{ width:17px; height:17px; flex:none; }
+  .aj-btn b{ font-family:var(--mono); font-weight:500; }
+  /* Fila − / + del sim rate: a lo ancho, debajo de los botones */
+  /* contain:inline-size: que la fila no cuente para el ancho del menú (si no, al abrirla el
+     menú se ensanchaba para que entraran los 6 botones y la fila en una sola línea) */
+  .aj-sr{ flex:1 0 100%; contain:inline-size; display:flex; align-items:center; justify-content:center; gap:10px; padding:4px 0 2px; }
+  .aj-sr.hidden{ display:none; }
+  .aj-sr button{ width:48px; height:42px; border:none; border-radius:12px; cursor:pointer; background:rgba(255,255,255,0.12);
+    color:var(--text); font-family:inherit; font-size:20px; font-weight:500; }
+  .aj-sr-v{ display:flex; flex-direction:column; align-items:center; gap:2px; min-width:70px; font-size:10.5px; color:var(--text-dim); }
+  .aj-sr-v b{ font-family:var(--mono); font-size:18px; font-weight:500; color:var(--text); }
+  #v-simrate.orange, #aj-sr-val.orange{ color:var(--orange); }
   .layer-opt{ display:flex; align-items:center; gap:12px; padding:8px; border-radius:12px; cursor:pointer; transition:background .15s; }
   .layer-opt:hover{ background:rgba(255,255,255,0.07); }
   .layer-opt .thumb{ width:40px; height:32px; border-radius:8px; flex:none; background-size:cover; background-position:center; border:1px solid rgba(255,255,255,0.18); }

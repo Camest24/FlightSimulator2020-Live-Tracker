@@ -50,8 +50,12 @@ function updatePanel(s){
   // El rumbo también en magnético, para que coincida con la brújula de la cabina
   if(s.heading!=null) setOdo('v-hdg',String(Math.round(toMag(s.heading))).padStart(3,'0')+'°');
   pintarRosa();                  // el avión de la rosa queda fijo; gira la flecha al destino
-  if(s.sim_rate!=null){ const r=s.sim_rate, e=document.getElementById('v-simrate');
-    if(e){ setOdo('v-simrate',(r%1===0?r:r.toFixed(2))+'×'); e.classList.toggle('orange',r>1); } }
+  if(s.sim_rate!=null){ const r=s.sim_rate, v=(r%1===0?r:r.toFixed(2))+'×';
+    const e=document.getElementById('v-simrate');
+    if(e){ setOdo('v-simrate',v); e.classList.toggle('orange',r>1); }
+    // El botón del engranaje también lo muestra (naranja si va acelerado)
+    const b=document.getElementById('aj-sr-val');
+    if(b){ b.textContent=v; b.classList.toggle('orange',r>1); } }
   { const d=s.distance_nm||0;
     setOdo('v-dist',d.toFixed(1));
     txt('s-dist',nf(km(d))+' km'); }

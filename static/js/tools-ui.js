@@ -7,7 +7,8 @@
    el mismo orden en que este codigo estaba escrito. No reordenar. */
 
 // ---- Engranaje de la barra: luces y hora del simulador ----
-// Abre un menú con luces y hora (sus modales de siempre), "Mostrar parqueados" (un
+// Abre un menú con el sim rate (su botón despliega la fila − / +), luces y hora (sus
+// modales de siempre), "Mostrar parqueados" (un
 // interruptor del tráfico IA) y, con ruta, añadir puntos y eliminar la ruta. Se cierra al
 // abrir luces u hora, al empezar a añadir puntos o al tocar afuera; con parqueados queda
 // abierto para que se vea si quedó prendido. No convive con el de capas.
@@ -21,9 +22,12 @@
   let tBorrar=null;
   function borrarNormal(){ clearTimeout(tBorrar); tBorrar=null; if(!borrar) return;
     borrar.classList.remove('confirmar'); borrar.querySelector('span').textContent='Eliminar ruta'; }
+  const srBtn=document.getElementById('btn-simrate'), srFila=document.getElementById('aj-sr');
+  function simRate(on){ if(!srFila) return; srFila.classList.toggle('hidden',!on); srBtn.classList.toggle('on',on); }
+  if(srBtn) srBtn.addEventListener('click',()=>simRate(srFila.classList.contains('hidden')));
   function abrir(on){
     menu.classList.toggle('hidden',!on); btn.classList.toggle('active',on);
-    if(!on){ borrarNormal(); return; }
+    if(!on){ borrarNormal(); simRate(false); return; }
     menu.querySelectorAll('.aj-ruta').forEach(b=>b.disabled=!routeTarget);
   }
   if(borrar) borrar.addEventListener('click',()=>{
@@ -40,7 +44,7 @@
   if(btnCapas) btnCapas.addEventListener('click',()=>abrir(false));
   // En captura: el botón de luces corta la propagación del click
   menu.addEventListener('click',e=>{ const b=e.target.closest('.aj-btn');
-    if(b && !b.disabled && b.id!=='btn-parked' && b.id!=='btn-borrar-ruta') abrir(false); }, true);
+    if(b && !b.disabled && !['btn-parked','btn-borrar-ruta','btn-simrate'].includes(b.id)) abrir(false); }, true);
   document.addEventListener('pointerdown',e=>{
     if(!menu.classList.contains('hidden') && !menu.contains(e.target) && !btn.contains(e.target)) abrir(false);
   }, true);
