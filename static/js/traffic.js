@@ -144,7 +144,7 @@ function updateTrafficLabels(pos){
       const el=document.createElement('div'); el.className='ac-label';
       // stopPropagation: sin esto el mismo toque llega al mapa, que suelta el seguimiento y cierra la tarjeta
       el.addEventListener('click',e=>{ e.stopPropagation(); selectTraffic(a.id); });
-      L={el,key:null,m:new maplibregl.Marker({element:el,anchor:'top-left',offset:[14,6]}).setLngLat(pos[a.id]).addTo(map)};
+      L={el,key:null,m:new mapboxgl.Marker({element:el,anchor:'top-left',offset:[14,6]}).setLngLat(pos[a.id]).addTo(map)};
       trafficLabels.set(a.id,L);
     }
     const key=(a.aerolinea_iata||'')+'|'+(a.aerolinea||'')+'|'+(a.etiqueta||'')+'|'+(a.on_ground?1:0);

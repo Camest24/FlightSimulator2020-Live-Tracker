@@ -722,7 +722,7 @@ def telemetry_loop():
             # el ángulo de banco derivando la velocidad de giro del rumbo entre muestras —
             # fràgil (dependía del framerate/buffer del lado del cliente) y seguía
             # "destellando" en las curvas. SimConnect ya lo expone directo, igual que
-            # VERTICAL_SPEED para el cabeceo (ver cesium-3d.js, que sí funcionó bien de
+            # VERTICAL_SPEED para el cabeceo (ver la vieja cesium-3d.js en el historial de git, que sí funcionó bien de
             # entrada con vs). Mismo signo raro que el rumbo: viene en radianes.
             bank = _safe_get(aq, "PLANE_BANK_DEGREES")
             if bank is not None:
@@ -1054,40 +1054,23 @@ def _no_cache(resp):
     return resp
 
 
-def _cesium_ion_token():
-    """Mismo patrón que simconnect_dll_path.txt: un archivo de una línea en data/, no
-    commiteado (ver .gitignore), para no hardcodear el token personal en el HTML. Sin el
-    archivo, el modo Terreno 3D simplemente no tiene terreno/imágenes reales (ver
-    cesium-3d.js) — no rompe nada, solo se degrada."""
-    hint_file = os.path.join(DATA_DIR, "cesium_ion_token.txt")
-    if os.path.exists(hint_file):
-        try:
-            with open(hint_file, "r", encoding="utf-8") as f:
-                return f.read().strip()
-        except Exception:
-            return ""
-    return ""
-
-
-def _cesium3d_version():
-    """Fecha de modificación de cesium-3d.js como query string (?v=...) del <script> que lo
-    carga. Sin esto, el navegador (sobre todo Safari/iOS, que cachea agresivo) puede seguir
-    sirviendo una versión vieja del archivo después de un cambio aunque hagas F5 — pasó en
-    vivo probando en iPad. Al cambiar el archivo, cambia el mtime, cambia la URL, y el
-    navegador la trata como un recurso nuevo sin que haga falta pedirle un hard-refresh."""
+def _mapbox_token():
+    """Token público de Mapbox (pk.) para el mapa: un archivo de una línea en data/, fuera
+    de git (ver .gitignore; el repo es público y el token gasta la cuota de la cuenta).
+    Sin el archivo el mapa no carga y la consola del navegador dice qué falta."""
+    path = os.path.join(DATA_DIR, "mapbox_token.txt")
     try:
-        path = os.path.join(BASE_DIR, "static", "js", "cesium-3d.js")
-        return str(int(os.path.getmtime(path)))
-    except Exception:
-        return "0"
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 @app.route("/")
 def index():
     return render_template(
         "index.html",
-        cesium_ion_token=_cesium_ion_token(),
-        cesium3d_version=_cesium3d_version(),
+        mapbox_token=_mapbox_token(),
     )
 
 

@@ -74,7 +74,7 @@ function updatePlaneIcon(s){
   acIconKey=key;
   if(meMarker) meMarker.getElement().innerHTML=mePlaneSVG();
 }
-function popup(html){ return new maplibregl.Popup({offset:16,closeButton:false}).setHTML(html); }
+function popup(html){ return new mapboxgl.Popup({offset:16,closeButton:false}).setHTML(html); }
 function acftEl(cls,svg,hdg){ const el=document.createElement('div'); el.innerHTML=`<div class="acft-inner ${cls}" style="transform:rotate(${hdg}deg)">${svg}</div>`; return el; }
 
 let followMode=true, meMarker=null, meInner=null;
@@ -83,7 +83,7 @@ let followMode=true, meMarker=null, meInner=null;
 // nada de esto toca Terreno 3D/Cesium, es la versión 2D de la misma idea.
 let towerMode2D=false, towerPoint2D=null;
 let aptMarkers=[], vorMarkers=[];
-const flags={apt:true,vor:true,terrain3d:false,grids:false};
+const flags={apt:true,vor:true,grids:false};
 let navRef=null, navAirports=[], navVors=[];
 let aptRadius=60, lastAptCenter=null;   // radio de aeropuertos (NM)
 // Celular (vertical u horizontal): mismo corte que las @media del final de main.css.
@@ -107,7 +107,6 @@ map.on('load',()=>{
     'line-opacity':['interpolate',['linear'],['zoom'],7,0,9.5,0.85]}});
   map.addSource('flown',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'flown',type:'line',source:'flown',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':['get','color'],'line-width':5}});
-  map.addLayer(planeModelLayer);
   // Ruta directa a un aeropuerto (plan de vuelo simple)
   map.addSource('planroute',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'planroute-line',type:'line',source:'planroute',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round'},paint:{'line-color':'#a855f7','line-width':3,'line-dasharray':[2,2]}});
@@ -119,16 +118,16 @@ map.on('load',()=>{
   map.addLayer({id:'planroute-vnav-pt',type:'circle',source:'planroute',filter:['has','vnav'],paint:{'circle-radius':7,
     'circle-color':['match',['get','vnav'],'toc','#4ade80','#38bdf8'],'circle-stroke-color':'#0f172a','circle-stroke-width':2.5}});
   map.addLayer({id:'planroute-vnav-lbl',type:'symbol',source:'planroute',filter:['has','vnav'],layout:{'text-field':['get','label'],
-    'text-font':['Noto Sans Bold'],'text-size':12.5,'text-line-height':1.25,'text-anchor':'bottom-left','text-justify':'left','text-offset':[0.9,-0.6],
+    'text-font':FUENTE_NEGRITA,'text-size':12.5,'text-line-height':1.25,'text-anchor':'bottom-left','text-justify':'left','text-offset':[0.9,-0.6],
     'text-allow-overlap':true,'text-ignore-placement':true},
     paint:{'text-color':['match',['get','vnav'],'toc','#86efac','#7dd3fc'],'text-halo-color':'rgba(10,10,20,0.92)','text-halo-width':2.4}});
   // Nombres de los VOR de la ruta generada. Al dibujarlos como capa del mapa (y no como
   // HTML encima) se comportan bien al inclinar la vista en 3D.
-  map.addLayer({id:'planroute-wp',type:'symbol',source:'planroute',filter:['all',['==',['geometry-type'],'Point'],['has','ident']],layout:{'text-field':['get','ident'],'text-font':['Noto Sans Bold'],'text-size':12.5,'text-offset':[0,1.3],'text-anchor':'top','text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#7dd3fc','text-halo-color':'rgba(10,10,20,0.92)','text-halo-width':2.4}});
+  map.addLayer({id:'planroute-wp',type:'symbol',source:'planroute',filter:['all',['==',['geometry-type'],'Point'],['has','ident']],layout:{'text-field':['get','ident'],'text-font':FUENTE_NEGRITA,'text-size':12.5,'text-offset':[0,1.3],'text-anchor':'top','text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#7dd3fc','text-halo-color':'rgba(10,10,20,0.92)','text-halo-width':2.4}});
   // 'line' + symbol-spacing repite la etiqueta a lo largo del trazo cada ~350 px de pantalla.
   // Con 'line-center' el texto vivía en el punto medio de la ruta: en un Cartagena-Boston
   // ese punto queda fuera de la vista y la etiqueta desaparecía.
-  map.addLayer({id:'planroute-label',type:'symbol',source:'planroute',filter:['==',['geometry-type'],'LineString'],layout:{'symbol-placement':'line','symbol-spacing':350,'text-field':['get','label'],'text-font':['Noto Sans Bold'],'text-size':17,'text-allow-overlap':true,'text-ignore-placement':true,'text-keep-upright':true},paint:{'text-color':'#ffffff','text-halo-color':'rgba(10,10,20,0.9)','text-halo-width':2.8,'text-halo-blur':0.3}});
+  map.addLayer({id:'planroute-label',type:'symbol',source:'planroute',filter:['==',['geometry-type'],'LineString'],layout:{'symbol-placement':'line','symbol-spacing':350,'text-field':['get','label'],'text-font':FUENTE_NEGRITA,'text-size':17,'text-allow-overlap':true,'text-ignore-placement':true,'text-keep-upright':true},paint:{'text-color':'#ffffff','text-halo-color':'rgba(10,10,20,0.9)','text-halo-width':2.8,'text-halo-blur':0.3}});
   // Plan de vuelo del propio MSFS (solo lectura) — línea magenta como la del GPS
   map.addSource('fplan',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'fplan-line',type:'line',source:'fplan',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#ff3df5','line-width':3.5,'line-opacity':0.9}});
@@ -140,11 +139,11 @@ map.on('load',()=>{
   // extendido para el destino elegido (solo si hay una pista concreta, con rumbo).
   map.addSource('coordgrid',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'coordgrid-line',type:'line',source:'coordgrid',filter:['==',['geometry-type'],'LineString'],paint:{'line-color':'#94a3b8','line-width':1,'line-opacity':0.5}});
-  map.addLayer({id:'coordgrid-label',type:'symbol',source:'coordgrid',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','label'],'text-font':['Noto Sans Bold'],'text-size':10.5,'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#cbd5e1','text-halo-color':'rgba(10,10,20,0.85)','text-halo-width':1.4}});
+  map.addLayer({id:'coordgrid-label',type:'symbol',source:'coordgrid',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','label'],'text-font':FUENTE_NEGRITA,'text-size':10.5,'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#cbd5e1','text-halo-color':'rgba(10,10,20,0.85)','text-halo-width':1.4}});
   map.addSource('rwyaxis',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
   map.addLayer({id:'rwyaxis-line',type:'line',source:'rwyaxis',filter:['==',['geometry-type'],'LineString'],paint:{'line-color':'#facc15','line-width':2,'line-dasharray':[1,2]}});
   map.addLayer({id:'rwyaxis-tick',type:'circle',source:'rwyaxis',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':3,'circle-color':'#facc15','circle-stroke-color':'#1e293b','circle-stroke-width':1}});
-  map.addLayer({id:'rwyaxis-label',type:'symbol',source:'rwyaxis',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','label'],'text-font':['Noto Sans Bold'],'text-size':11,'text-offset':[0,-1.1],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#facc15','text-halo-color':'rgba(10,10,20,0.85)','text-halo-width':1.6}});
+  map.addLayer({id:'rwyaxis-label',type:'symbol',source:'rwyaxis',filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','label'],'text-font':FUENTE_NEGRITA,'text-size':11,'text-offset':[0,-1.1],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#facc15','text-halo-color':'rgba(10,10,20,0.85)','text-halo-width':1.6}});
   map.on('moveend',updateGrids);
   map.on('zoomend',updateGrids);
   // La etiqueta de la ruta va al tope de la pila: si no, la línea magenta del plan de
@@ -197,11 +196,6 @@ map.on('click',(e)=>{
 });
 function follow(){ followMode=true; document.getElementById('btn-center').classList.add('active'); }
 document.getElementById('btn-center').onclick=()=>{
-  // En modo Terreno 3D la cámara YA está siempre centrada en el avión (no hay "soltar
-  // seguimiento" ahí, a diferencia del mapa 2D) — acá el botón cambia de sentido: resetea
-  // la órbita a la vista default, derecho detrás del avión, por si quedó mirando desde
-  // cualquier otro ángulo por un drag anterior.
-  if(planeModelOn && window.cesium3D){ window.cesium3D.recenter(); return; }
   // Salir de la cámara de torre 2D: mismo botón de siempre, vuelve derecho a seguir al
   // avión en vez de quedar plantado en el punto que tocaste.
   if(towerMode2D){
@@ -232,11 +226,11 @@ let autoRecentrar=true, ultimoToque=Date.now();
 function haciendoAlgoEnElMapa(){
   const visible=id=>{ const el=document.getElementById(id); return !!el && !el.classList.contains('hidden'); };
   return addWpMode || (typeof lpMarker!=='undefined' && lpMarker)
-    || !!document.querySelector('.maplibregl-popup')
+    || !!document.querySelector('.mapboxgl-popup')
     || ['search-panel','ac-card','resumen-modal','hist-modal','opts-modal','status-modal','tabla-modal','time-modal'].some(visible);
 }
 setInterval(()=>{
-  if(followMode || !autoRecentrar || towerMode2D || planeModelOn || !meMarker) return;
+  if(followMode || !autoRecentrar || towerMode2D || !meMarker) return;
   if(Date.now()-ultimoToque<RECENTRAR_MS || haciendoAlgoEnElMapa()) return;
   // Se marca ANTES de guardar `toque` (que no se vuelva a disparar mientras dura la
   // animación). Al revés, la comprobación de abajo nunca coincidía y no volvía a seguir.

@@ -1,5 +1,5 @@
 /* telemetry.js — Telemetria en vivo: odometro, poll(), buffer de interpolacion, y la camara que sigue
-   al avion cada frame (planeFrame/chaseCenterFor viven aca porque corren en el mismo bucle).
+   al avion cada frame (planeFrame vive aca porque corren en el mismo bucle).
 
    Extraido tal cual del unico bloque <script> que vivia dentro de templates/index.html.
    Se carga como <script src> clasico (NO type=module): todos estos archivos comparten el
@@ -99,7 +99,6 @@ function updateRoute(route){
     fc.features.push({type:'Feature',properties:{color:altColor(last[2]||0)},
                       geometry:{type:'LineString',coordinates:[[last[1],last[0]],[cur.lng,cur.lat]]}}); }
   const src=map.getSource('flown'); if(src) src.setData(fc);
-  update3DTrail(route,drawTo);
 }
 
 // Interpolación con buffer de retardo (~1.2s): reproducimos el avión caminando sobre la
@@ -125,12 +124,9 @@ function lerpAngle(a,b,t){ const d=((b-a+540)%360)-180; return a+d*t; }
 
 function updatePlane(s){
   if(s.lat==null||s.lon==null) return;
-  // finiteNum en vez de "||0": un heading/alt que llegue NaN o Infinity (dato corrupto del
-  // sim) no debe colarse hasta las matrices de three.js — ahí un solo NaN arruina toda la
-  // rotación y el modelo 3D se ve roto/"invertido".
+  // finiteNum en vez de "||0": un heading que llegue NaN o Infinity (dato corrupto del
+  // sim) no debe colarse en la rotación del ícono.
   const hdg=finiteNum(s.heading,0);
-  curAltFt=finiteNum(s.alt,0);
-  curOnGround=!!s.on_ground;
   const now=performance.now();
   // Ver comentario de GAP_MS: si pasó demasiado desde la última muestra, el tab estuvo
   // oculto y 'cur' quedó congelado. Vaciamos el buffer viejo así el próximo planeFrame()
@@ -140,84 +136,23 @@ function updatePlane(s){
   buf.push({lng:s.lon,lat:s.lat,hdg,t:now});
   if(buf.length>14) buf.shift();
   if(!meMarker){ const el=document.createElement('div'); el.className='plane-me'; el.innerHTML=mePlaneSVG();
-    // Si Terreno 3D ya estaba activo ANTES de que llegara la primera posición, el ícono 2D
-    // nace visible igual (setPlaneModelVisible ya había corrido y no encontró meMarker para
-    // ocultarlo). Arrancarlo oculto en ese caso evita que quede pegado encima del modelo 3D.
-    if(planeModelOn) el.style.display='none';
     // rotationAlignment/pitchAlignment 'map' => el ícono se apoya en el plano del mapa y
     // apunta al rumbo real tanto en 2D como en 3D (arregla el desvío visual al inclinar).
-    meMarker=new maplibregl.Marker({element:el,anchor:'center',rotationAlignment:'map',pitchAlignment:'map'})
+    meMarker=new mapboxgl.Marker({element:el,anchor:'center',rotationAlignment:'map',pitchAlignment:'map'})
       .setLngLat([s.lon,s.lat]).setRotation(hdg).addTo(map);
     cur={lng:s.lon,lat:s.lat,hdg};
     map.jumpTo({center:[s.lon,s.lat],zoom:14}); }  // primer contacto: encuadra la pista
 }
 
 let lastCenterAt=0;
-// Cada cuánto llamamos a map.setCenter()/setBearing() como máximo, en ms. El ícono/modelo
-// se sigue actualizando cada frame (barato: mover un marcador), pero mover la CÁMARA del
-// mapa 60 veces por segundo — sobre todo con Terreno 3D, que además recalcula relieve y
-// vuelve a dibujar la capa custom de three.js en cada repintado — resultó ser demasiado
+// Cada cuánto llamamos a map.setCenter()/setBearing() como máximo, en ms. El ícono se
+// sigue actualizando cada frame (barato: mover un marcador), pero mover la CÁMARA del
+// mapa 60 veces por segundo — sobre todo con el viejo Terreno 3D, que además recalculaba
+// relieve y una capa custom de three.js en cada repintado — resultó ser demasiado
 // trabajo seguido: en una prueba real esto llegó a colgar la pestaña entera. La posición
 // real tampoco cambia más rápido que el propio telemetry_loop (10 lecturas/seg), así que no
 // hace falta re-centrar más seguido que eso para que se vea igual de fluido.
 const CENTER_MIN_MS=120;
-// Cámara de persecución (Terreno 3D + seguimiento): pitch fijo, alto, y el mapa gira para
-// que el rumbo del avión siempre "mire" hacia el fondo de la pantalla, como en un sim de
-// vuelo en tercera persona. El norte deja de estar arriba mientras este modo está activo;
-// es intencional.
-// OJO: el centro NO es directamente [cur.lng,cur.lat] (eso sería el punto del SUELO debajo
-// del avión). El modelo 3D se dibuja a la altitud real (ver render() de planeModelLayer),
-// y con la cámara tan inclinada ese punto elevado cae lejos del centro de pantalla cuando
-// centramos en el suelo — se ve como "el centrado está clavado en otro lado, muy lejos".
-// chaseCenterFor() corrige esto: usa la MISMA matriz de proyección con la que se dibuja el
-// modelo para calcular en qué píxel cae el avión (a su altura real), y elige un punto de
-// centrado distinto (reflejado) para que ESE píxel termine en el medio de la pantalla.
-// Bajado de 67 a 52: a 67° (casi horizontal) el avión en crucero queda MÁS ALLÁ del
-// horizonte de la vista, fuera de cualquier zona proyectable — ahí la corrección de abajo
-// no tiene ningún punto real que devolver (probado en vivo: ndcY llegaba a 4.08, cuando
-// el rango visible es -1..1). Con menos pitch el avión se mantiene dentro de cámara en el
-// rango de altitud normal, así que la corrección puede aplicar de verdad la mayor parte
-// del tiempo, en vez de caer siempre al respaldo sin corregir.
-const CHASE_PITCH=52;
-const CHASE_ZOOM=16.5;   // qué tan cerca queda la cámara del avión en modo persecución
-// Dado un punto [lng,lat] al nivel del suelo y una elevación en metros, devuelve el punto
-// de centrado que hace que la posición ELEVADA (a esa altura) caiga en el medio de la
-// pantalla, usando la última matriz de proyección real (lastRenderMatrix). Reflejo directo
-// del píxel proyectado, desproyectado al suelo (no invertido: ver historial, invertirlo
-// mandaba la cámara para el lado contrario).
-//
-// GUARDA CRÍTICA: si el punto elevado cae fuera de la pantalla (por encima del horizonte,
-// detrás de cámara, o simplemente lejos del cuadro), desproyectar ESE píxel no da un punto
-// real del mapa — da basura (a veces a cientos de km), y usarla es lo que mandaba la
-// cámara "a velocidad supersónica" en una dirección fija. Por eso: si el punto no cae dentro
-// de un margen razonable alrededor de la pantalla visible, NO corregimos nada este tick y
-// devolvemos el punto del suelo tal cual (el comportamiento simple de antes, estable aunque
-// a veces no perfectamente centrado — nunca diverge).
-function chaseCenterFor(lng,lat,altM){
-  const ground=[lng,lat];
-  if(!lastRenderMatrix) return ground;
-  const merc=maplibregl.MercatorCoordinate.fromLngLat(ground,altM);
-  const m=lastRenderMatrix;
-  const cx=m[0]*merc.x+m[4]*merc.y+m[8]*merc.z+m[12];
-  const cy=m[1]*merc.x+m[5]*merc.y+m[9]*merc.z+m[13];
-  const cw_=m[3]*merc.x+m[7]*merc.y+m[11]*merc.z+m[15];
-  if(!(cw_>1e-4)) return ground;   // detrás de cámara / casi en el plano de cámara: no fiable
-  const ndcX=cx/cw_, ndcY=cy/cw_;
-  const canvas=map.getCanvas();
-  const cw2=canvas.clientWidth, ch2=canvas.clientHeight;
-  if(!cw2||!ch2) return ground;
-  const px=(ndcX*0.5+0.5)*cw2;
-  const py=(1-(ndcY*0.5+0.5))*ch2;
-  // Margen: aceptamos hasta medio cuadro de sobra en cada lado. Fuera de eso, el punto ya
-  // está tan lejos del área visible que la desproyección deja de ser confiable.
-  const marginX=cw2*0.5, marginY=ch2*0.5;
-  if(px<-marginX || px>cw2+marginX || py<-marginY || py>ch2+marginY) return ground;
-  try{
-    const p=map.unproject([px, py]);
-    if(isFinite(p.lng)&&isFinite(p.lat)) return [p.lng,p.lat];
-  }catch(e){}
-  return ground;
-}
 function planeFrame(now){
   if(meMarker && buf.length){
     const rt=now-DELAY;                       // tiempo de reproducción (atrasado)
@@ -232,7 +167,6 @@ function planeFrame(now){
     cur={lng:p.lng,lat:p.lat,hdg:p.hdg};
     meMarker.setLngLat([cur.lng,cur.lat]);
     meMarker.setRotation(cur.hdg);
-    const wantChase=followMode && planeModelOn;
     if(towerMode2D && towerPoint2D && now-lastCenterAt>=CENTER_MIN_MS && !map.isZooming() && !map.isRotating()){
       // Cámara de torre 2D: el CENTRO nunca se mueve de towerPoint2D (es fijo, como el
       // mástil de una torre real) — lo único que cambia frame a frame es el BEARING, para
@@ -243,19 +177,7 @@ function planeFrame(now){
       map.setBearing(bearingTo(towerPoint2D[1], towerPoint2D[0], cur.lat, cur.lng));
     } else if(followMode && now-lastCenterAt>=CENTER_MIN_MS && !map.isZooming() && !map.isRotating()){
       lastCenterAt=now;
-      if(wantChase){
-        // Fijamos el pitch acá mismo, sin animación (nada de tiltTo): una transición
-        // animada encadenada por requestAnimationFrame puede quedar a mitad de camino si
-        // la pestaña se oculta justo en ese momento (rAF se pausa) — el mismo problema que
-        // ya nos mordió con el rumbo. setPitch instantáneo no tiene ese punto de falla.
-        const altM=Math.max(terrainElevM(cur.lng,cur.lat), Math.max(0,finiteNum(curAltFt,0)*0.3048));
-        map.setCenter(chaseCenterFor(cur.lng,cur.lat,altM));
-        map.setBearing(cur.hdg);
-        map.setPitch(CHASE_PITCH);
-        map.setZoom(CHASE_ZOOM);
-      } else {
-        map.setCenter(centroSeguir(cur.lng,cur.lat));
-      }
+      map.setCenter(centroSeguir(cur.lng,cur.lat));
     }
   }
   requestAnimationFrame(planeFrame);
@@ -280,10 +202,8 @@ function offsetActual(){
   if(!(abajo>arriba+80)) return 0;
   return Math.round((arriba+abajo)/2 - alto/2);      // negativo: el avión sube
 }
-// Centro de cámara para el seguimiento "clásico" (norte fijo arriba, sin Terreno 3D o sin
-// persecución activa): el punto en el suelo, corrido `dy` píxeles para no quedar tapado
-// por el dock. En modo persecución (ver CHASE_PITCH en planeFrame) esto ni se usa — ahí
-// el centro es directamente [cur.lng,cur.lat], sin proyectar/desproyectar nada.
+// Centro de cámara para el seguimiento: el punto en el suelo, corrido `dy` píxeles para
+// no quedar tapado por el dock.
 function centroSeguir(lng,lat){
   const dy=offsetActual();
   if(Math.abs(dy)<2) return [lng,lat];
@@ -382,7 +302,7 @@ function renderVors(center){
     const el=document.createElement('div'); el.className='vor-mk';
     if(!nearAnyCenter(centers,v.lat,v.lon)){ el.dataset.view='1'; el.style.opacity=viewFadeAlpha(); }
     el.innerHTML='<svg width="26" height="26" viewBox="0 0 32 32"><circle cx="16" cy="16" r="10.5" fill="rgba(34,211,238,0.12)" stroke="#22d3ee" stroke-width="1.6"/><g stroke="#22d3ee" stroke-width="1.6" stroke-linecap="round"><path d="M16 3v3.5M16 25.5v3.5M3 16h3.5M25.5 16h3.5"/></g><circle cx="16" cy="16" r="2.3" fill="#22d3ee"/></svg>';
-    vorMarkers.push(new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([v.lon,v.lat])
+    vorMarkers.push(new mapboxgl.Marker({element:el,anchor:'center'}).setLngLat([v.lon,v.lat])
       .setPopup(popup('<b>'+v.id+'</b> · '+v.name+'<br><span class="pp-sub">VOR · '+v.freq+' MHz</span>'
         +'<div class="pp-actions"><button class="pp-btn-wp" onclick="addNamedWp('+v.lat+','+v.lon+",'"+v.id+"')\">＋ A la ruta</button></div>")).addTo(map)); });
 }
@@ -401,7 +321,7 @@ function aptPopupHTML(a){
     +'<b>'+a.icao+'</b> · '+a.name+'<br><span class="pp-sub">Elev '+(a.elev_ft||'?')+' ft'+rwtxt+dist+'</span><div class="pp-actions"></div>';
 }
 function rebuildAptActions(a){   // rellena los botones al abrir el popup (evita estados pegados)
-  const box=document.querySelector('.maplibregl-popup-content .pp-actions'); if(!box) return;
+  const box=document.querySelector('.mapboxgl-popup-content .pp-actions'); if(!box) return;
   // Solo cuenta como "ruta activa" si ya tiene pista elegida. Un destino que llegó solo
   // (plan de MSFS detectado automáticamente) queda con pista:null, centrado en la torre;
   // si contara como activo acá, el botón pasaría a "Quitar ruta" y ya no se podría abrir
@@ -417,7 +337,7 @@ function aptMarker(a,byView){
   // La opacidad se fija AL CREARLO. Si se dejaba para después, el marcador nacía opaco
   // y recién en el siguiente cuadro se atenuaba: eso era el parpadeo.
   if(byView){ el.dataset.view='1'; el.style.opacity=viewFadeAlpha(); }
-  const m=new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([a.lon,a.lat]).setPopup(popup(aptPopupHTML(a))).addTo(map);
+  const m=new mapboxgl.Marker({element:el,anchor:'bottom'}).setLngLat([a.lon,a.lat]).setPopup(popup(aptPopupHTML(a))).addTo(map);
   m.getPopup().on('open',()=>rebuildAptActions(a));
   return m;
 }

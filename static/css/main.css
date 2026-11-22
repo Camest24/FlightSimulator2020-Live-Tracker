@@ -56,7 +56,6 @@
   .tool-btn.disabled:active{ transform:none; }
   .pill .dot{ transition:background .3s; }
   #map{ position:absolute; inset:0; z-index:1; background:#0b0e14; }
-  .maplibregl-ctrl-attrib, .maplibregl-ctrl-bottom-right, .maplibregl-ctrl-bottom-left{ display:none !important; }
 
   /* Pantalla de espera (tapa el mapa hasta tener una posición real, no el 0,0 del menú) */
   #waiting{ position:absolute; inset:0; z-index:2000; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:26px; text-align:center; color:var(--text); background:rgba(11,14,20,0.82); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); transition:opacity .4s; }
@@ -427,8 +426,8 @@
   .pf-lugar{ display:flex; align-items:baseline; gap:5px; max-width:100%; min-width:0; }
   .pf-lugar b{ font-size:19px; font-weight:600; letter-spacing:-.2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
   .pf-lugar small{ flex:none; font-size:10.5px; font-weight:600; color:var(--text-dim); letter-spacing:.04em; }
-  /* A la altura de las ciudades, no de los km (más arriba que el resto de la fila) */
-  .pf-aterriza{ align-self:start; margin-top:7px; font-size:13.5px; font-weight:500; color:var(--text); white-space:nowrap; }
+  /* Encima de la línea, centrado */
+  .pf-aterriza{ grid-column:2; grid-row:1; justify-self:center; font-size:13px; font-weight:500; color:var(--text); white-space:nowrap; }
 
   /* -- Estante (•••): lo que se toca poco -- */
   /* El ancho deja libre la columna de la derecha (zoom, brújula, "P") a los dos lados, para
@@ -620,11 +619,11 @@
   .pp-btn-wp{ background:#a855f7; }
   .pp-actions button:disabled{ opacity:.6; cursor:default; }
 
-  .maplibregl-popup-content{ background:var(--glass-bg); color:var(--text); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
+  .mapboxgl-popup-content{ background:var(--glass-bg); color:var(--text); backdrop-filter:blur(24px) saturate(180%); -webkit-backdrop-filter:blur(24px) saturate(180%);
     border:1px solid var(--glass-brd); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.25);
     font-family:'Roboto',sans-serif; font-size:13px; line-height:1.5; padding:11px 14px; }
-  .maplibregl-popup-tip{ display:none; }
-  .maplibregl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
+  .mapboxgl-popup-tip{ display:none; }
+  .mapboxgl-popup-content b{ font-size:14px; } .pp-sub{ color:var(--text-dim); }
   .apt-photo{ width:100%; height:auto; border-radius:9px; display:block; margin-bottom:8px; }
 
   /* ==== Pantallas táctiles, iPad vertical y celular ====================================
@@ -703,15 +702,6 @@
     .asa-barra{ display:none !important; }
   }
 
-  /* ---- Modo "Terreno 3D": el pedido fue que el shader low-poly del avión/terreno también
-     se sienta en los MENÚS de encima, no solo en la escena de Cesium — así todo combina.
-     Se activa/desactiva agregando/quitando esta clase en <body> desde cesium-3d.js
-     (setActive). Dos capas: un filter con colores planos y saturados sobre TODO (incluida
-     la escena 3D — no hace daño repetir el efecto ahí, refuerza el look), más un overlay
-     fijo de scanlines finitas (pantalla vieja) que no bloquea clicks (pointer-events:none). */
-  body.retro3d-on{ filter:contrast(1.28) saturate(1.55) brightness(1.04); }
-  body.retro3d-on::after{
-    content:''; position:fixed; inset:0; z-index:9999; pointer-events:none;
-    background:repeating-linear-gradient(to bottom, rgba(0,0,0,0.09) 0px, rgba(0,0,0,0.09) 1px, transparent 1px, transparent 3px);
-    mix-blend-mode:multiply; opacity:.35;
-  }
+  /* Logo y crédito de Mapbox (obligatorios): arriba, que abajo está el dock. Un poco
+     corridos hacia adentro para no pegarse al borde redondeado del iPad. */
+  .mapboxgl-ctrl-top-left, .mapboxgl-ctrl-top-right{ margin:8px; }

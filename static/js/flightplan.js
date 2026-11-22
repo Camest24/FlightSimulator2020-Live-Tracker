@@ -30,12 +30,10 @@ function showPointMenu(lngLat){
   el.querySelector('.lp-cam').onclick=()=>{ placeTower2D(lngLat.lat, lngLat.lng); closePointMenu(); };
   el.querySelector('.lp-tp').onclick=()=>showTeleportForm(el, lngLat);
   el.querySelector('.lp-x').onclick=closePointMenu;
-  lpMarker=new maplibregl.Marker({element:el, anchor:'bottom', offset:[0,-12]}).setLngLat(lngLat).addTo(map);
+  lpMarker=new mapboxgl.Marker({element:el, anchor:'bottom', offset:[0,-12]}).setLngLat(lngLat).addTo(map);
 }
-// Cámara de torre en el mapa 2D — misma idea que la de Terreno 3D (ver cesium-3d.js), pero
-// para el mapa normal: centro FIJO en el punto tocado (a lo sumo 5 km del avión, igual que
-// en 3D) y el mapa rota solo para seguir mirando hacia el avión (ver planeFrame en
-// telemetry.js). Nada de esto toca Cesium/Terreno 3D.
+// Cámara de torre en el mapa: centro FIJO en el punto tocado (a lo sumo 5 km del avión) y
+// el mapa rota solo para seguir mirando hacia el avión (ver planeFrame en telemetry.js).
 const TOWER2D_MAX_M=5000;
 function placeTower2D(lat,lng){
   if(!cur) return;
@@ -197,7 +195,7 @@ function addWaypoint(lng,lat,name,append){
   // Cuando el punto viene del generador de rutas (name truthy) cae EXACTO sobre el VOR:
   // los dos marcadores quedan pixel a pixel encima uno del otro y es una lotería cuál
   // recibe el click. Lo corremos unos px para que ambos queden clickeables por separado.
-  const m=new maplibregl.Marker({element:el,anchor:'center',offset:name?[9,-9]:[0,0]}).setLngLat([lng,lat])
+  const m=new mapboxgl.Marker({element:el,anchor:'center',offset:name?[9,-9]:[0,0]}).setLngLat([lng,lat])
     .setPopup(popup('<b>'+(name||'Punto de ruta')+'</b>'+(name?'<br><span class="pp-sub">VOR de la ruta generada</span>':'')
       +'<div class="pp-actions"><button class="pp-btn-remove" onclick="removeWaypoint('+id+')">Quitar punto</button></div>')).addTo(map);
   const wp={id:id,lat:lat,lon:lng,marker:m,name:name||null};
@@ -511,15 +509,8 @@ function aptCenter(){ return cur || (navRef?{lng:navRef[1],lat:navRef[0]}:null);
 // Aeropuertos y VOR quedaron fijos en "siempre visibles" (flags.apt/vor ya nacen en true
 // y nada los apaga); este toggle era el que los prendía/apagaba, ahora lo ocupa Grids.
 bindToggle(document.getElementById('tg-grids'),'grids',()=>updateGrids());
-// Terreno 3D: ahora es la vista de Cesium (terreno real + modelo real), no el terreno
-// nativo de MapLibre + avión de Three.js de antes (ver cesium-3d.js — ese código viejo
-// queda sin llamar, no borrado, por si hay que volver atrás rápido).
-// setPlaneModelVisible(on) se mantiene: oculta el ícono 2D mientras el modo 3D está
-// activo, para que no quede pegado debajo de Cesium cuando se vuelve a 2D.
-bindToggle(document.getElementById('tg-terrain3d'),'terrain3d',(on)=>{
-  setPlaneModelVisible(on);
-  if(window.cesium3D) window.cesium3D.setActive(on);
-});
+// (Acá estaba el interruptor "Terreno 3D" (Cesium): se sacó con la migración a Mapbox,
+// 2026-11-22. Nunca se usaba.)
 function changeRadius(d){ aptRadius=Math.max(20,Math.min(200,aptRadius+d)); document.getElementById('rad-val').textContent=aptRadius+' NM · '+km(aptRadius)+' km'; renderNav(aptCenter()); }
 document.getElementById('rad-minus').onclick=()=>changeRadius(-20);
 document.getElementById('rad-plus').onclick=()=>changeRadius(20);

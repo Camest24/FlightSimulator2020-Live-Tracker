@@ -10,7 +10,7 @@
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <meta name="theme-color" content="#0b0e14">
 <link rel="manifest" href="/static/manifest.webmanifest">
-<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<link href="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css" rel="stylesheet" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
@@ -19,20 +19,9 @@
 <body>
 <div id="map"></div>
 
-<!-- Vista Cesium (Terreno 3D): oculta por defecto, se muestra al activar el toggle del
-     panel de capas. Cesium.js y el modelo del avión se cargan recién ahí (ver
-     cesium-3d.js) — no en cada apertura de la app, para no pesar la carga normal. -->
-<div id="cesium-container" style="display:none;position:absolute;inset:0;z-index:1;"></div>
-<div id="cesium-loading" class="glass" style="display:none;position:absolute;inset:0;z-index:2500;
-  flex-direction:column;align-items:center;justify-content:center;gap:12px;
-  background:rgba(11,14,20,0.92);color:#fff;font-family:inherit;">
-  <div class="w-spinner"></div>
-  <div style="font-size:14px;opacity:.85;">Cargando terreno 3D…</div>
-</div>
 <script>
-  // Token de Cesium ion (data/cesium_ion_token.txt en el servidor, ver app.py). Vacío si no
-  // existe el archivo — cesium-3d.js lo maneja sin romper nada (ver ese archivo).
-  window.CESIUM_ION_TOKEN = "{{ cesium_ion_token|e }}";
+  // Token público de Mapbox (data/mapbox_token.txt en el servidor, fuera de git: ver app.py)
+  window.MAPBOX_TOKEN = "{{ mapbox_token|e }}";
 </script>
 
 <div id="waiting">
@@ -196,13 +185,6 @@
          por eso va pegado a la fila del radio. -->
     <div class="toggle-opt"><span class="tico"><svg width="18" height="18" viewBox="0 0 24 24" fill="#facc15"><path d="M12 2c.8 0 1.4.7 1.4 1.6V9l7.6 4.4v2l-7.6-2.2v4.6l2.2 1.7V21L12 20l-3.6 1v-1.5l2.2-1.7v-4.6L3 15.4v-2L10.6 9V3.6C10.6 2.7 11.2 2 12 2z"/></svg></span><span class="name">Tráfico IA <span class="tr-count" id="traffic-count"></span></span><span class="sw-toggle on" id="tg-traffic"></span></div>
     <div class="radius-row"><span class="rr-label">Radio</span><button class="rr-btn" id="rad-minus">−</button><span id="rad-val">60 NM</span><button class="rr-btn" id="rad-plus">+</button></div>
-    <div class="divider"></div>
-    <div class="toggle-opt"><span class="tico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b6f47" stroke-width="1.8" stroke-linejoin="round"><path d="M3 19l6-10 4 6 2-3 6 7z"/></svg></span><span class="name">Terreno 3D</span><span class="sw-toggle" id="tg-terrain3d"></span></div>
-    <!-- Crédito exigido por la licencia CC-BY 4.0 del modelo del avión (Sketchfab). -->
-    <div style="padding:2px 14px 8px;font-size:10.5px;opacity:.55;line-height:1.4;">
-      Modelo 3D: <a href="https://sketchfab.com/3d-models/airbus-a320-200-v2-c078f9af15884a6b820c7e778831b110" target="_blank" rel="noopener" style="color:inherit;">Airbus A320-200 V2</a>
-      por <a href="https://sketchfab.com/fDlruosne" target="_blank" rel="noopener" style="color:inherit;">Dlourine</a>, CC-BY 4.0.
-    </div>
   </div>
 </div>
 
@@ -304,18 +286,12 @@
 
 <!-- Tarjeta del avión de tráfico IA seleccionado: la arma static/js/traffic.js -->
 <div id="ac-card" class="glass hidden"></div>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<!-- three.js clásico (no-módulo, para encajar con el resto del archivo) para el modelo 3D
-     del avión en modo Terreno 3D. Se arma con primitivas (cilindro/cono/cajas), no con un
-     .glb externo: sin archivo que cargar no hay carga asíncrona ni condición de carrera con
-     el primer render de la capa. -->
-<script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
 <!-- JS de la app, dividido por responsabilidad. Scripts clasicos: comparten scope global
      y el ORDEN IMPORTA (es el mismo en que estaba escrito cuando era un solo bloque). -->
 <script src="/static/js/map-setup.js"></script>
 <script src="/static/js/plane-3d.js"></script>
-<script src="/static/js/cesium-3d.js?v={{ cesium3d_version }}"></script>
 <script src="/static/js/geo-utils.js"></script>
 <script src="/static/js/flight-progress.js"></script>
 <script src="/static/js/flightplan.js"></script>

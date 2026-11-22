@@ -12,6 +12,7 @@ data/simbridge_path.txt
 data/simbridge_exe.txt
 data/simconnect_dll_path.txt
 data/cesium_ion_token.txt
+data/mapbox_token.txt
 data/msfs-live.log
 data/jetphotos_cache.json
 data/jetphotos_cache.json.tmp
