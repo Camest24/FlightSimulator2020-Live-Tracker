@@ -17,7 +17,7 @@ python tools/aig_modo.py instalar-tarea  # una vez: tarea programada que abre AI
 
 - No hay tests, linter ni paso de build. Para verificar un cambio: arrancar en `--debug` o con la demo y abrir http://localhost:5001.
 - Cambios en `static/` o `templates/` se ven recargando el navegador. Cambios en Python requieren reiniciar el server (la demo se reinicia sola).
-- Diagnóstico en vivo: `/api/live_airways_status`, `/api/simbridge_status`.
+- Diagnóstico en vivo: `/api/live_airways_status`.
 - Los `.bat` matan cualquier proceso que siga escuchando en :5001 antes de arrancar.
 - `tools/aig_modo.py` (fuera de la app): con todo el tráfico mundial AIGTC tarda 6-10 min en cargar en cada arranque. El acceso directo "MSFS + AIG" del escritorio (`--abrir-msfs`) pregunta el modo (Colombia por defecto, tecla M = mundial), mueve los flight plans que sobran a `D:\AIG_apartados` y abre AIGTC y MSFS. En `exe.xml` AIGTC ya no se lanza directo sino vía `--preguntar` (respaldo si se abre MSFS desde Steam; respaldo del xml en `exe.xml.bak-aigmodo-20261101`). Antes de usar AIG Manager: modo `todo`. AIGTC SÍ necesita ser administrador (sin elevar no escribe su caché en ProgramData ni abre su WCF en :8733): se abre con la tarea programada si existe, si no con aviso de UAC.
 - No matar a la fuerza la app que lanzó MSFS: su servicio de fotos (npm → wrangler → workerd, :8787) queda huérfano y Steam se queda en "Deteniendo". Para recargar Python, cerrar y abrir MSFS.

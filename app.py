@@ -73,10 +73,6 @@ from server.routing import (generate_route, generate_route_auto, _path_len, pars
                             _resolve_token, _resumen_aerovias, _comprimir, _AIRWAY_RE, _SKIP)
 from server.flight_store import (load_current_flight, save_current_flight, read_history,
                                  write_history, archive_flight_to_history)
-from server.simbridge import (SIMBRIDGE_HINT, SIMBRIDGE_GUESSES, SIMBRIDGE_EXES,
-                              SIMBRIDGE_EXE_HINT, find_coroutes_dirs, find_coroutes_dir,
-                              _simbridge_port, simbridge_status, _buscar_exe_en,
-                              find_simbridge_exe, _community_dirs, _xml_esc, build_coroute_xml)
 
 app = Flask(__name__)
 
@@ -1430,118 +1426,9 @@ def api_genroute():
 
 
 
-@app.route("/api/simbridge_status")
-def api_simbridge_status():
-    """Diagnóstico: dónde se guardan las rutas y si SimBridge las está sirviendo."""
-    st = simbridge_status(request.args.get("name") or None)
-    st["carpetas"] = find_coroutes_dirs()
-    st["exe"] = find_simbridge_exe()
-    # Si no lo encuentra, esto dice dónde miró: sirve para saber qué falta revisar en vez
-    # de quedarse con un "null" sin explicación.
-    if not st["exe"]:
-        st["community"] = _community_dirs()
-        st["puede_anotarse_en"] = SIMBRIDGE_EXE_HINT
-    return jsonify(st)
-
-
-
-
-
-
-
-
-
-
-
-
-@app.route("/api/simbridge_start", methods=["POST"])
-def api_simbridge_start():
-    """Abre SimBridge si lo encontramos. Sin esto, el MCDU falla y desde la app no había
-    forma de arreglarlo: había que ir a buscarlo al menú de inicio."""
-    st = simbridge_status()
-    if st["vivo"]:
-        return jsonify({"ok": True, "ya_estaba": True})
-
-    exe = find_simbridge_exe()
-    if not exe:
-        return jsonify({"ok": False, "reason": "no_encontrado"})
-    try:
-        subprocess.Popen([exe], cwd=os.path.dirname(exe), close_fds=True)
-    except Exception as e:
-        return jsonify({"ok": False, "reason": "no_pude_abrirlo", "detail": str(e), "exe": exe})
-
-    # Tarda unos segundos en levantar el servidor; esperamos a que conteste.
-    for _ in range(20):
-        time.sleep(0.5)
-        if simbridge_status()["vivo"]:
-            return jsonify({"ok": True, "exe": exe})
-    return jsonify({"ok": False, "reason": "no_respondio", "exe": exe})
-
-
-
-
-
-
-@app.route("/api/coroute", methods=["POST"])
-def api_coroute():
-    """Recibe la ruta de la app y la deja lista para cargar desde el MCDU."""
-    d = request.get_json(silent=True) or {}
-    origin = (d.get("origin") or "").strip().upper()
-    destination = (d.get("destination") or "").strip().upper()
-    if not origin or not destination:
-        return jsonify({"ok": False, "reason": "faltan_aeropuertos"})
-
-    folders = find_coroutes_dirs()
-    if not folders:
-        return jsonify({"ok": False, "reason": "no_simbridge"})
-
-    # Antes mandábamos también los puntos intermedios (VOR) de la ruta que arma la app.
-    # En la práctica el FMS del avión los busca en SU PROPIA base de navegación (la del
-    # sim/Navigraph), que no es la misma de donde salen nuestros VOR (OurAirports). Cuando
-    # no los reconoce los descarta sin avisar y deja un "F-PLN DISCONTINUITY" en el medio.
-    # Origen y destino sí siempre existen (son aeropuertos ICAO reales), así que ahora solo
-    # mandamos esos dos: entra limpio con un solo INSERT, sin cortes ni duplicados.
-
-    def _apt_fix(icao, lat, lon):
-        return {"ident": icao, "name": icao, "type": "apt", "via": "DCT",
-                "lat": float(lat), "lon": float(lon)}
-
-    fixes = []
-    try:
-        olat, olon = float(d.get("origin_lat")), float(d.get("origin_lon"))
-        fixes.append(_apt_fix(origin, olat, olon))
-    except (TypeError, ValueError):
-        pass
-    try:
-        dlat, dlon = float(d.get("dest_lat")), float(d.get("dest_lon"))
-        fixes.append(_apt_fix(destination, dlat, dlon))
-    except (TypeError, ValueError):
-        pass
-    if len(fixes) < 2:
-        return jsonify({"ok": False, "reason": "ruta_muy_corta"})
-
-    name = (origin + destination)[:9]              # el MCDU acepta hasta 9 caracteres
-    route_str = "DCT"
-    xml = build_coroute_xml(origin, destination, fixes, route_str)
-
-    escritos, errores = [], []
-    for folder in folders:
-        path = os.path.join(folder, name + ".xml")
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(xml)
-            escritos.append(path)
-        except Exception as e:
-            errores.append("%s: %s" % (path, e))
-    if not escritos:
-        return jsonify({"ok": False, "reason": "no_pude_escribir", "detail": "; ".join(errores)})
-
-    # El archivo puede estar perfecto y el MCDU dar error igual, simplemente porque
-    # SimBridge no está abierto. Se comprueba acá para poder decirlo en pantalla.
-    sb = simbridge_status(name)
-    return jsonify({"ok": True, "name": name, "fixes": len(fixes),
-                    "path": escritos[0], "paths": escritos,
-                    "simbridge": sb})
+# Acá estaban /api/simbridge_status, /api/simbridge_start y /api/coroute (exportar la ruta
+# como company route para el MCDU de FlyByWire). Se sacaron el 2026-11-21: ya no se usaban.
+# server/simbridge.py queda porque server/aig_fp.py usa _community_dirs.
 
 
 @app.route("/api/history")

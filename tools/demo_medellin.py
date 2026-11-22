@@ -27,7 +27,7 @@ import time
 # raiz a mano o el `import app` de abajo falla.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from flask import jsonify, request
+from flask import jsonify
 
 import app as appmod
 
@@ -57,34 +57,9 @@ pause_lock = threading.Lock()
 pause_started_at = None     # time.time() de cuando arrancó la pausa actual
 paused_total = 0.0          # segundos ya descontados por pausas anteriores
 
-DEMO_CONTROLS_HTML = """
-<div id="demo-pause-widget" style="position:fixed;bottom:16px;right:16px;z-index:99999;font-family:system-ui,sans-serif;">
-  <button id="demo-pause-btn" style="background:#1e293b;color:#fbbf24;border:1px solid #fbbf24;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4);">&#9208; Pausar demo</button>
-</div>
-<script>
-(function(){
-  var btn=document.getElementById('demo-pause-btn');
-  function setLabel(paused){ btn.textContent = paused ? '\\u25B6 Reanudar demo' : '\\u23F8 Pausar demo'; }
-  btn.onclick=function(){
-    btn.disabled=true;
-    fetch('/api/demo_pause',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
-      setLabel(d.paused);
-    }).finally(function(){ btn.disabled=false; });
-  };
-})();
-</script>
-"""
-
-
-@appmod.app.after_request
-def _inject_demo_controls(resp):
-    # Solo toca la respuesta de "/": el resto de las rutas (API, estáticos) queda intacto.
-    # Así el botón vive enteramente acá, sin tocar templates/index.html.
-    if request.path == "/" and (resp.content_type or "").startswith("text/html"):
-        html = resp.get_data(as_text=True)
-        if "</body>" in html:
-            resp.set_data(html.replace("</body>", DEMO_CONTROLS_HTML + "</body>"))
-    return resp
+# El botón flotante "Pausar demo" se sacó (2026-11-21): tapaba el rincón del dock de abajo.
+# La pausa sigue andando por la API, desde la terminal:
+#   curl -X POST http://localhost:5001/api/demo_pause      (otra vez para reanudar)
 
 
 @appmod.app.route("/api/demo_pause", methods=["POST"])
