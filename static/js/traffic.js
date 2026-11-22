@@ -277,7 +277,13 @@ function fotoDe(a){
     // Una foto del tipo correcto (aunque sea otro avión) explica mejor que la de la matrícula
     // con otro tipo: por eso la reserva va al final.
     return reserva;
-  })().then(f=>{ if(f && f.exacta && a.matricula) guardarFoto(key,f); return f; });
+  })().then(f=>{
+    if(f && f.exacta && a.matricula) guardarFoto(key,f);
+    // "Sin foto" no se recuerda toda la sesión: la primera consulta levanta el servicio de
+    // JetPhotos (~25 s en frío) y puede volver vacía aunque la foto exista. Al minuto se reintenta.
+    if(!f) setTimeout(()=>trafficFotos.delete(key),60e3);
+    return f;
+  });
   trafficFotos.set(key,p);
   return p;
 }

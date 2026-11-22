@@ -30,6 +30,7 @@ import re
 import threading
 import time
 
+from server import aig_fp
 from server.geo import _haversine_nm
 from server.live_airways import (w, HRESULT, SimConnectDLL, _WINDOWS, _RECV, _RECV_EXCEPTION,
                                  RECV_ID_OPEN, RECV_ID_QUIT, RECV_ID_EXCEPTION)
@@ -190,7 +191,17 @@ def _ficha(a):
     if not matricula:
         mm = _RE_MATRICULA.search(a["title"])
         matricula = mm.group(1) if mm else ""
+    # Sin callsign (AIG a veces manda la matrícula en ATC ID y el número de vuelo suelto):
+    # la aerolínea sale de los flight plans de AIG, ver server/aig_fp.py.
+    fp = aig_fp.buscar(matricula, a["flight"]) if not icao and matricula else None
+    if fp:
+        icao = fp["icao"]
+        if fp["vuelo"]:
+            num, callsign = fp["vuelo"], fp["icao"] + fp["vuelo"]
     iata, nombre = AEROLINEAS.get(icao, (None, None))
+    if fp and not iata:
+        # AIG escribe algunas con minúscula ("avianca Express")
+        iata, nombre = fp["iata"] or None, (fp["nombre"][:1].upper() + fp["nombre"][1:]) or None
     aerolinea = nombre or a["airline"].title()
     if iata and num:
         vuelo = iata + " " + num
